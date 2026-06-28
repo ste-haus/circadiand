@@ -1,7 +1,7 @@
 PYTHON ?= python3
 IMAGE   ?= ghcr.io/ste-haus/circadiand
 VERSION := $(shell tr -d '[:space:]' < VERSION)
-CONFIG  ?= config.sample.yaml
+CONFIG  ?= config.yaml
 
 .PHONY: help install test run docker-build docker-push publish clean
 
@@ -15,7 +15,7 @@ install: ## Install the package with test extras (editable)
 test: ## Run the test suite with coverage
 	$(PYTHON) -m pytest
 
-run: ## Run the service locally against $(CONFIG)
+run: ## Run the service locally against $(CONFIG) (auto-created from the sample if missing)
 	CIRCADIAND_CONFIG=$(CONFIG) $(PYTHON) -m circadiand
 
 docker-build: ## Build the container image, tagged with VERSION and latest

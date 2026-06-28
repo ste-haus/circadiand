@@ -30,7 +30,7 @@ Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw sc
 circadiand acts as a single dedicated `circadiand` SSH identity. The private key is used by the `ssh` method to connect; the public key is served at `GET /public-key`. The keypair is resolved at startup with this priority:
 
 1. **env** — `CIRCADIAND_SSH_KEY` (private) plus `CIRCADIAND_SSH_PUBLIC_KEY` (defaults to `${CIRCADIAND_SSH_KEY}.pub`). Both files must exist, or startup fails — pointing the env at a missing file never triggers generation.
-2. **config** — an `identity` section in the config file naming `private_key` / `public_key` paths (see [`config.sample.yaml`](config.sample.yaml)).
+2. **config** — an `identity` section in the config file naming `private_key` / `public_key` paths (see [`circadiand/config.sample.yaml`](circadiand/config.sample.yaml)).
 3. **default** — `circadiand` and `circadiand.pub` in the same directory as the config file.
 
 For cases 2 and 3, the files are used if present and a fresh ed25519 keypair is generated (private `0600`) if absent. So a bare deployment with a writable config directory bootstraps its own identity on first run; set the env vars, an `identity` section, or drop a keypair in place to supply your own.
@@ -45,7 +45,7 @@ curl -s http://circadiand:8000/public-key >> ~/.ssh/authorized_keys
 
 ## Configuration
 
-A YAML file injected into the container. See [`config.sample.yaml`](config.sample.yaml):
+A YAML file injected into the container. If no file exists at `CIRCADIAND_CONFIG` on startup, circadiand writes a demo config (based on the bundled sample) to that path and loads it — so a fresh deployment comes up with an editable example rather than an error. See [`circadiand/config.sample.yaml`](circadiand/config.sample.yaml):
 
 ```yaml
 defaults:
@@ -96,20 +96,20 @@ Locally:
 
 ```bash
 make install
-make run                      # uses config.sample.yaml; override with CONFIG=...
+make run                      # writes ./config.yaml from the sample on first run; override with CONFIG=...
 ```
 
 Docker:
 
 ```bash
 make docker-build             # builds ghcr.io/ste-haus/circadiand:{version,latest}
-mkdir -p config && cp config.sample.yaml config/config.yaml
+mkdir -p config
 docker run --rm -p 8000:8000 \
   -v "$PWD/config:/config" \
   ghcr.io/ste-haus/circadiand:latest
 ```
 
-`/config` holds `config.yaml` and the SSH identity. With a writable mount and no keypair present, circadiand generates one into `/config/circadiand[.pub]` on first start (see [Identity](#identity)).
+`/config` holds `config.yaml` and the SSH identity. On first start, with a writable mount and an empty `/config`, circadiand writes a demo `config.yaml` from the sample and generates an SSH keypair into `/config/circadiand[.pub]` (see [Identity](#identity)).
 
 The image is published to `ghcr.io/ste-haus/circadiand` by the GitHub Actions workflow on every push to `main` (after tests pass), tagged with the `VERSION` file contents and `latest`.
 

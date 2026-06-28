@@ -2,7 +2,7 @@
 
 import pytest
 
-from circadiand.config import load_config
+from circadiand.config import ensure_config, load_config, sample_config_text
 from circadiand.errors import (
     ConfigError,
     HostNotFound,
@@ -238,3 +238,27 @@ def test_no_hosts_fails(tmp_path):
 def test_missing_file_fails(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "does-not-exist.yaml")
+
+
+def test_ensure_config_creates_demo_when_missing(tmp_path):
+    target = tmp_path / "sub" / "config.yaml"  # parent dir doesn't exist yet
+    created = ensure_config(target)
+    assert created is True
+    assert target.is_file()
+    assert target.read_text() == sample_config_text()
+    # the generated demo must be a valid, loadable config
+    config = load_config(target)
+    assert "nas" in config.hosts
+
+
+def test_ensure_config_does_not_overwrite_existing(tmp_path):
+    target = tmp_path / "config.yaml"
+    target.write_text("hosts:\n  keep:\n    methods:\n      - {type: wol, mac: a}\n")
+    created = ensure_config(target)
+    assert created is False
+    assert "keep" in target.read_text()
+
+
+def test_malformed_yaml_raises_config_error(tmp_path):
+    with pytest.raises(ConfigError, match="not valid YAML"):
+        load_config(write(tmp_path, "hosts: [unbalanced\n"))

@@ -26,6 +26,7 @@ structure all raise :class:`ConfigError` at startup.
 """
 
 import dataclasses
+from importlib import resources
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,6 +34,8 @@ import yaml
 
 from .errors import ConfigError, HostNotFound, MethodNotFound, NoDefaultMethod
 from .methods import ACTIONS, METHOD_REGISTRY, Method
+
+SAMPLE_CONFIG_FILENAME = "config.sample.yaml"
 
 KEY_DEFAULTS = "defaults"
 KEY_DEFAULT = "default"
@@ -166,6 +169,24 @@ def _parse_host(name: str, block: Any) -> Host:
             )
 
     return Host(name=name, methods=methods, defaults=defaults)
+
+
+def sample_config_text() -> str:
+    """Return the bundled sample config (packaged alongside this module)."""
+    return resources.files(__package__).joinpath(SAMPLE_CONFIG_FILENAME).read_text()
+
+
+def ensure_config(path: str | Path) -> bool:
+    """Create a demo config from the bundled sample if ``path`` doesn't exist.
+
+    Returns True if a file was written, False if one was already present.
+    """
+    config_path = Path(path)
+    if config_path.exists():
+        return False
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(sample_config_text())
+    return True
 
 
 def load_config(path: str | Path) -> Config:
