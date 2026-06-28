@@ -5,12 +5,15 @@ Configuration precedence: CLI flag > environment variable > built-in default.
 
 import argparse
 import logging
+import os
 
 import uvicorn
 
 from . import __version__
 from .api import create_api
 from .config import load_config
+from .keys import load_identity
+from .methods.ssh import ENV_SSH_KEY
 from .utils import get_env_int, get_env_str
 
 ENV_CONFIG = "CIRCADIAND_CONFIG"
@@ -51,6 +54,14 @@ def main() -> None:
     args = build_parser().parse_args()
 
     _LOGGER.info("circadiand %s starting", __version__)
+
+    # Resolve the identity first (env > /config file > generate). Export the
+    # resolved private key path so ssh methods built during load_config pick up
+    # the same key when no explicit key_path or env var was provided.
+    private_key_path, public_key = load_identity()
+    os.environ[ENV_SSH_KEY] = private_key_path
+    _LOGGER.info("using SSH identity private key at %s", private_key_path)
+
     _LOGGER.info("loading config from %s", args.config)
     config = load_config(args.config)
     _LOGGER.info("loaded %d host(s): %s", len(config.hosts), ", ".join(config.hosts))
@@ -61,7 +72,7 @@ def main() -> None:
     else:
         _LOGGER.warning("no %s set — endpoints are unauthenticated", ENV_API_TOKEN)
 
-    app = create_api(config, api_token=api_token)
+    app = create_api(config, api_token=api_token, public_key=public_key)
     uvicorn.run(app, host=args.host, port=args.port)
 
 

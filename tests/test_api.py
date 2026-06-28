@@ -7,7 +7,7 @@ from circadiand.config import Config
 from circadiand.errors import ExecutionError
 from circadiand.methods.base import ACTION_DOWN, ACTION_UP
 
-from .conftest import FakeMethod, make_host
+from .conftest import FAKE_PUBLIC_KEY, FakeMethod, make_host
 
 
 def test_list(client):
@@ -131,4 +131,32 @@ def test_openapi_schema(client):
     assert resp.status_code == 200
     schema = resp.json()
     assert schema["info"]["title"] == "circadiand"
-    assert {"/list", "/up", "/down"} <= set(schema["paths"])
+    assert {"/list", "/up", "/down", "/public-key"} <= set(schema["paths"])
+
+
+# --- public key --------------------------------------------------------------
+
+def test_public_key_returns_plaintext(client):
+    resp = client.get("/public-key")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.text == FAKE_PUBLIC_KEY
+
+
+def test_public_key_unauthenticated_even_with_token():
+    host = make_host("box", [FakeMethod("wol", "box", up=True)], {ACTION_UP: "wol"})
+    config = Config(hosts={"box": host}, defaults={})
+    client = TestClient(
+        create_api(config, api_token="s3cret", public_key=FAKE_PUBLIC_KEY)
+    )
+    # No Authorization header — public key must still be served.
+    resp = client.get("/public-key")
+    assert resp.status_code == 200
+    assert resp.text == FAKE_PUBLIC_KEY
+
+
+def test_public_key_404_when_unconfigured():
+    host = make_host("box", [FakeMethod("wol", "box", up=True)], {ACTION_UP: "wol"})
+    config = Config(hosts={"box": host}, defaults={})
+    client = TestClient(create_api(config))  # no public_key
+    assert client.get("/public-key").status_code == 404

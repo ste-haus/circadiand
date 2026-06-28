@@ -3,7 +3,7 @@
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -22,6 +22,7 @@ APP_DESCRIPTION = (
 
 TAG_HOSTS = "hosts"
 TAG_POWER = "power"
+TAG_IDENTITY = "identity"
 
 STATUS_OK = "ok"
 
@@ -66,7 +67,11 @@ def _resolved_defaults(config: Config, hostname: str) -> dict[str, str]:
     return resolved
 
 
-def create_api(config: Config, api_token: Optional[str] = None) -> FastAPI:
+def create_api(
+    config: Config,
+    api_token: Optional[str] = None,
+    public_key: Optional[str] = None,
+) -> FastAPI:
     app = FastAPI(title=APP_TITLE, version=__version__, description=APP_DESCRIPTION)
     bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -120,6 +125,30 @@ def create_api(config: Config, api_token: Optional[str] = None) -> FastAPI:
                 methods=methods, defaults=_resolved_defaults(config, name)
             )
         return result
+
+    @app.get(
+        "/public-key",
+        response_class=PlainTextResponse,
+        tags=[TAG_IDENTITY],
+        summary="Get the circadiand SSH public key",
+        responses={
+            status.HTTP_200_OK: {
+                "content": {"text/plain": {}},
+                "description": "The public key, suitable for an authorized_keys entry.",
+            },
+            status.HTTP_404_NOT_FOUND: {"description": "No public key configured"},
+        },
+    )
+    def get_public_key() -> str:
+        # Intentionally unauthenticated: a public key is meant to be distributed,
+        # and hosts typically fetch it while being provisioned (before they trust
+        # the identity).
+        if not public_key:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no public key configured",
+            )
+        return public_key
 
     @app.post(
         "/up",

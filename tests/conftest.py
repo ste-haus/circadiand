@@ -79,6 +79,9 @@ def config() -> Config:
     )
 
 
+FAKE_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEY circadiand"
+
+
 @pytest.fixture
 def client(config: Config) -> TestClient:
-    return TestClient(create_api(config))
+    return TestClient(create_api(config, public_key=FAKE_PUBLIC_KEY))

@@ -7,6 +7,7 @@ A small REST service for powering hosts **on** (Wake-on-LAN, IPMI) and **off** (
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
 | GET | `/list` | — | List configured hosts, their methods/actions, and resolved defaults. |
+| GET | `/public-key` | — | Return the circadiand SSH public key as plaintext. |
 | POST | `/up` | `{"hostname": "...", "method": "..."?}` | Power a host on. |
 | POST | `/down` | `{"hostname": "...", "method": "..."?}` | Power a host off. |
 
@@ -24,7 +25,23 @@ Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw sc
 
 > IPMI power-off is implemented but disabled (`SUPPORTS_OFF = False`) until needed.
 
-SSH uses key-based auth as the dedicated `circadiand` identity — inject the private key into the container and point `CIRCADIAND_SSH_KEY` (or a method's `key_path`) at it. All target hosts must trust this identity. Host-key checking uses `AutoAddPolicy` (trusted-network assumption).
+## Identity
+
+circadiand acts as a single dedicated `circadiand` SSH identity. The private key is used by the `ssh` method to connect; the public key is served at `GET /public-key`. The keypair is resolved at startup with this priority:
+
+1. **env** — `CIRCADIAND_SSH_KEY` (private) plus `CIRCADIAND_SSH_PUBLIC_KEY` (defaults to `${CIRCADIAND_SSH_KEY}.pub`). Both files must exist, or startup fails — pointing the env at a missing file never triggers generation.
+2. **file** — `/config/circadiand` and `/config/circadiand.pub` if already present.
+3. **generate** — a fresh ed25519 keypair is generated and written to `/config/circadiand` (private `0600`) and `/config/circadiand.pub`.
+
+This means a bare deployment with a writable `/config` volume bootstraps its own identity on first run; mount a keypair (or set the env vars) to supply your own.
+
+To provision a target host, fetch the public key and append it to the host's `authorized_keys`:
+
+```bash
+curl -s http://circadiand:8000/public-key >> ~/.ssh/authorized_keys
+```
+
+`/public-key` is intentionally unauthenticated even when `CIRCADIAND_API_TOKEN` is set — a public key is meant to be distributed, and hosts typically fetch it while being provisioned. Host-key checking uses `AutoAddPolicy` (trusted-network assumption).
 
 ## Configuration
 
@@ -62,7 +79,8 @@ Invalid config (unknown method type, duplicate type on a host, a default naming 
 | `CIRCADIAND_CONFIG` | `/config/config.yaml` | Path to the config file. |
 | `CIRCADIAND_HOST` | `0.0.0.0` | Bind host. |
 | `CIRCADIAND_PORT` | `8000` | Bind port. |
-| `CIRCADIAND_SSH_KEY` | — | Default private key path for the `ssh` method. |
+| `CIRCADIAND_SSH_KEY` | — | Private key path for the `circadiand` identity (required). |
+| `CIRCADIAND_SSH_PUBLIC_KEY` | `${CIRCADIAND_SSH_KEY}.pub` | Public key path, served at `/public-key` (required). |
 | `CIRCADIAND_API_TOKEN` | — | If set, require `Authorization: Bearer <token>`. If unset, endpoints are open. |
 
 ## Running
@@ -80,11 +98,13 @@ Docker:
 
 ```bash
 make docker-build             # builds ghcr.io/ste-haus/circadiand:{version,latest}
+mkdir -p config && cp config.sample.yaml config/config.yaml
 docker run --rm -p 8000:8000 \
-  -v "$PWD/config.yaml:/config/config.yaml:ro" \
-  -v "$PWD/keys/circadiand:/keys/circadiand:ro" \
+  -v "$PWD/config:/config" \
   ghcr.io/ste-haus/circadiand:latest
 ```
+
+`/config` holds `config.yaml` and the SSH identity. With a writable mount and no keypair present, circadiand generates one into `/config/circadiand[.pub]` on first start (see [Identity](#identity)).
 
 The image is published to `ghcr.io/ste-haus/circadiand` by the GitHub Actions workflow on every push to `main` (after tests pass), tagged with the `VERSION` file contents and `latest`.
 

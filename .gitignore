@@ -12,6 +12,7 @@ htmlcov/
 
 # Local runtime artifacts — never commit real config or keys
 config.yaml
+config/
 keys/
 *.pem
 *.key

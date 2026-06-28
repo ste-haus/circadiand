@@ -26,14 +26,20 @@ def test_parser_defaults(monkeypatch):
     assert args.host == main_module.DEFAULT_HOST
 
 
-def test_main_loads_config_and_runs(monkeypatch):
+def test_main_loads_config_and_runs(monkeypatch, tmp_path):
     started = {}
 
     def fake_run(app, host, port):
         started["host"] = host
         started["port"] = port
 
-    monkeypatch.setenv("CIRCADIAND_SSH_KEY", "/keys/id")  # sample ssh methods need a key
+    # The sample ssh methods plus /public-key require an injected keypair.
+    private = tmp_path / "id"
+    public = tmp_path / "id.pub"
+    private.write_text("PRIVATE")
+    public.write_text("ssh-ed25519 AAAA circadiand")
+
+    monkeypatch.setenv("CIRCADIAND_SSH_KEY", str(private))
     monkeypatch.setattr(main_module.uvicorn, "run", fake_run)
     monkeypatch.setattr(
         "sys.argv", ["circadiand", "--config", str(SAMPLE_CONFIG), "--port", "9999"]
