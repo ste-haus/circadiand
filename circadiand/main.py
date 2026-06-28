@@ -6,6 +6,7 @@ Configuration precedence: CLI flag > environment variable > built-in default.
 import argparse
 import logging
 import os
+from pathlib import Path
 
 import uvicorn
 
@@ -54,17 +55,17 @@ def main() -> None:
     args = build_parser().parse_args()
 
     _LOGGER.info("circadiand %s starting", __version__)
-
-    # Resolve the identity first (env > /config file > generate). Export the
-    # resolved private key path so ssh methods built during load_config pick up
-    # the same key when no explicit key_path or env var was provided.
-    private_key_path, public_key = load_identity()
-    os.environ[ENV_SSH_KEY] = private_key_path
-    _LOGGER.info("using SSH identity private key at %s", private_key_path)
-
     _LOGGER.info("loading config from %s", args.config)
     config = load_config(args.config)
     _LOGGER.info("loaded %d host(s): %s", len(config.hosts), ", ".join(config.hosts))
+
+    # Resolve the identity (env > config identity > default in the config dir;
+    # generated if absent). Export the resolved private key path so ssh methods
+    # use the same key when no explicit per-method key_path was given.
+    config_dir = Path(args.config).resolve().parent
+    private_key_path, public_key = load_identity(config_dir, config.identity)
+    os.environ[ENV_SSH_KEY] = private_key_path
+    _LOGGER.info("using SSH identity private key at %s", private_key_path)
 
     api_token = get_env_str(ENV_API_TOKEN)
     if api_token:

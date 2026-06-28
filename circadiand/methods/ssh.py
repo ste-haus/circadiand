@@ -6,13 +6,13 @@ AutoAddPolicy — pragmatic for a trusted network; tighten to a mounted
 known_hosts later if desired.
 """
 
-import os
 from typing import Any
 
 import paramiko
 
 from .base import ACTION_DOWN, Method, register, require_key
-from ..errors import ConfigError, ExecutionError
+from ..errors import ExecutionError
+from ..utils import get_env_str
 
 DEFAULT_SSH_PORT = 22
 DEFAULT_SSH_USERNAME = "circadiand"
@@ -30,8 +30,9 @@ class SshMethod(Method):
         host:             target address (required)
         username:         SSH user (optional, default "circadiand")
         port:             SSH port (optional, default 22)
-        key_path:         private key path (optional, defaults to
-                          $CIRCADIAND_SSH_KEY)
+        key_path:         per-method private key override (optional). When unset,
+                          the resolved circadiand identity ($CIRCADIAND_SSH_KEY)
+                          is used at call time.
         shutdown_command: command to run (optional, default
                           "sudo shutdown -h now")
     """
@@ -44,15 +45,21 @@ class SshMethod(Method):
         self.host = require_key(config, "host", hostname, self.TYPE)
         self.username = config.get("username", DEFAULT_SSH_USERNAME)
         self.port = int(config.get("port", DEFAULT_SSH_PORT))
-        self.key_path = config.get("key_path") or os.getenv(ENV_SSH_KEY)
-        if not self.key_path:
-            raise ConfigError(
-                f"host '{hostname}' method '{self.TYPE}' has no key_path and "
-                f"${ENV_SSH_KEY} is unset"
-            )
+        # Explicit per-method override; the identity default is resolved lazily so
+        # the keypair can be set up after the config (and its methods) are parsed.
+        self.key_path = config.get("key_path")
         self.shutdown_command = config.get("shutdown_command", DEFAULT_SHUTDOWN_COMMAND)
 
+    def _resolve_key_path(self) -> str:
+        key_path = self.key_path or get_env_str(ENV_SSH_KEY)
+        if not key_path:
+            raise ExecutionError(
+                self.TYPE, ACTION_DOWN, f"no SSH key configured (${ENV_SSH_KEY})"
+            )
+        return key_path
+
     def power_down(self) -> str:
+        key_path = self._resolve_key_path()
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
@@ -60,7 +67,7 @@ class SshMethod(Method):
                 hostname=self.host,
                 port=self.port,
                 username=self.username,
-                key_filename=self.key_path,
+                key_filename=key_path,
                 timeout=CONNECT_TIMEOUT_SECONDS,
             )
             _, stdout, stderr = client.exec_command(

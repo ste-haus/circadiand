@@ -181,6 +181,55 @@ hosts:
         load_config(write(tmp_path, text))
 
 
+def test_identity_section_parsed(tmp_path):
+    text = """
+identity:
+  private_key: /keys/circadiand
+  public_key: /keys/circadiand.pub
+hosts:
+  box:
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    config = load_config(write(tmp_path, text))
+    assert config.identity.private_key == "/keys/circadiand"
+    assert config.identity.public_key == "/keys/circadiand.pub"
+
+
+def test_identity_defaults_to_empty(tmp_path):
+    config = load_config(write(tmp_path, VALID))
+    assert config.identity.private_key is None
+    assert config.identity.public_key is None
+
+
+def test_identity_must_be_mapping(tmp_path):
+    text = """
+identity: "/keys/circadiand"
+hosts:
+  box:
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    with pytest.raises(ConfigError, match="'identity' must be a mapping"):
+        load_config(write(tmp_path, text))
+
+
+def test_identity_path_must_be_string(tmp_path):
+    text = """
+identity:
+  private_key: 42
+hosts:
+  box:
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    with pytest.raises(ConfigError, match="must be a string path"):
+        load_config(write(tmp_path, text))
+
+
 def test_no_hosts_fails(tmp_path):
     with pytest.raises(ConfigError, match="hosts"):
         load_config(write(tmp_path, "defaults: {}\n"))

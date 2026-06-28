@@ -30,10 +30,10 @@ Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw sc
 circadiand acts as a single dedicated `circadiand` SSH identity. The private key is used by the `ssh` method to connect; the public key is served at `GET /public-key`. The keypair is resolved at startup with this priority:
 
 1. **env** — `CIRCADIAND_SSH_KEY` (private) plus `CIRCADIAND_SSH_PUBLIC_KEY` (defaults to `${CIRCADIAND_SSH_KEY}.pub`). Both files must exist, or startup fails — pointing the env at a missing file never triggers generation.
-2. **file** — `/config/circadiand` and `/config/circadiand.pub` if already present.
-3. **generate** — a fresh ed25519 keypair is generated and written to `/config/circadiand` (private `0600`) and `/config/circadiand.pub`.
+2. **config** — an `identity` section in the config file naming `private_key` / `public_key` paths (see [`config.sample.yaml`](config.sample.yaml)).
+3. **default** — `circadiand` and `circadiand.pub` in the same directory as the config file.
 
-This means a bare deployment with a writable `/config` volume bootstraps its own identity on first run; mount a keypair (or set the env vars) to supply your own.
+For cases 2 and 3, the files are used if present and a fresh ed25519 keypair is generated (private `0600`) if absent. So a bare deployment with a writable config directory bootstraps its own identity on first run; set the env vars, an `identity` section, or drop a keypair in place to supply your own.
 
 To provision a target host, fetch the public key and append it to the host's `authorized_keys`:
 
@@ -79,8 +79,8 @@ Invalid config (unknown method type, duplicate type on a host, a default naming 
 | `CIRCADIAND_CONFIG` | `/config/config.yaml` | Path to the config file. |
 | `CIRCADIAND_HOST` | `0.0.0.0` | Bind host. |
 | `CIRCADIAND_PORT` | `8000` | Bind port. |
-| `CIRCADIAND_SSH_KEY` | — | Private key path for the `circadiand` identity (required). |
-| `CIRCADIAND_SSH_PUBLIC_KEY` | `${CIRCADIAND_SSH_KEY}.pub` | Public key path, served at `/public-key` (required). |
+| `CIRCADIAND_SSH_KEY` | — | Private key path override for the `circadiand` identity. If set, the file must exist. |
+| `CIRCADIAND_SSH_PUBLIC_KEY` | `${CIRCADIAND_SSH_KEY}.pub` | Public key path override (only used when `CIRCADIAND_SSH_KEY` is set). |
 | `CIRCADIAND_API_TOKEN` | — | If set, require `Authorization: Bearer <token>`. If unset, endpoints are open. |
 
 ## Running

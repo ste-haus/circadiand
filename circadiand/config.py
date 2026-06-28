@@ -40,6 +40,18 @@ KEY_METHOD = "method"
 KEY_METHODS = "methods"
 KEY_HOSTS = "hosts"
 KEY_TYPE = "type"
+KEY_IDENTITY = "identity"
+KEY_PRIVATE_KEY = "private_key"
+KEY_PUBLIC_KEY = "public_key"
+
+
+@dataclasses.dataclass
+class Identity:
+    """Optional SSH keypair locations from the config file. ``None`` means fall
+    back to the default location (the config file's directory)."""
+
+    private_key: Optional[str] = None
+    public_key: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -53,6 +65,7 @@ class Host:
 class Config:
     hosts: dict[str, Host]
     defaults: dict[str, str]            # global action -> method type fallback
+    identity: Identity = dataclasses.field(default_factory=Identity)
 
     def get_host(self, hostname: str) -> Host:
         host = self.hosts.get(hostname)
@@ -100,6 +113,19 @@ def _parse_method_defaults(block: Any, where: str) -> dict[str, str]:
             )
         result[action] = method_type
     return result
+
+
+def _parse_identity(block: Any) -> Identity:
+    if block is None:
+        return Identity()
+    if not isinstance(block, dict):
+        raise ConfigError(f"'{KEY_IDENTITY}' must be a mapping")
+    private = block.get(KEY_PRIVATE_KEY)
+    public = block.get(KEY_PUBLIC_KEY)
+    for key, value in ((KEY_PRIVATE_KEY, private), (KEY_PUBLIC_KEY, public)):
+        if value is not None and not isinstance(value, str):
+            raise ConfigError(f"'{KEY_IDENTITY}.{key}' must be a string path")
+    return Identity(private_key=private, public_key=public)
 
 
 def _parse_host(name: str, block: Any) -> Host:
@@ -165,5 +191,7 @@ def load_config(path: str | Path) -> Config:
     if not isinstance(hosts_block, dict) or not hosts_block:
         raise ConfigError(f"config must define a non-empty '{KEY_HOSTS}' mapping")
 
+    identity = _parse_identity(raw.get(KEY_IDENTITY))
+
     hosts = {name: _parse_host(name, block) for name, block in hosts_block.items()}
-    return Config(hosts=hosts, defaults=global_defaults)
+    return Config(hosts=hosts, defaults=global_defaults, identity=identity)

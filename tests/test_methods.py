@@ -174,12 +174,20 @@ def test_ssh_nonzero_exit_raises(monkeypatch):
 
 
 def test_ssh_key_path_from_env(monkeypatch):
+    # No explicit key_path -> resolved from the env identity at call time.
     monkeypatch.setenv(ENV_SSH_KEY, "/env/key")
     ssh = SshMethod("box", host="10.0.0.10")
-    assert ssh.key_path == "/env/key"
+    assert ssh._resolve_key_path() == "/env/key"
 
 
-def test_ssh_requires_key(monkeypatch):
+def test_ssh_explicit_key_path_wins(monkeypatch):
+    monkeypatch.setenv(ENV_SSH_KEY, "/env/key")
+    ssh = SshMethod("box", host="10.0.0.10", key_path="/explicit/key")
+    assert ssh._resolve_key_path() == "/explicit/key"
+
+
+def test_ssh_missing_key_errors_at_call_time(monkeypatch):
     monkeypatch.delenv(ENV_SSH_KEY, raising=False)
-    with pytest.raises(ConfigError, match="key_path"):
-        SshMethod("box", host="10.0.0.10")
+    ssh = SshMethod("box", host="10.0.0.10")  # construction succeeds
+    with pytest.raises(ExecutionError, match="no SSH key configured"):
+        ssh.power_down()

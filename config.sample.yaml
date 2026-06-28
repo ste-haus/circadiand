@@ -1,5 +1,13 @@
 # circadiand configuration.
 #
+# Optional: where the circadiand SSH identity keypair lives. Defaults to this
+# config file's directory (circadiand + circadiand.pub). The CIRCADIAND_SSH_KEY /
+# CIRCADIAND_SSH_PUBLIC_KEY env vars override this. If the files don't exist,
+# a new ed25519 keypair is generated at the resolved location.
+# identity:
+#   private_key: /config/circadiand
+#   public_key: /config/circadiand.pub
+
 # Global method defaults apply to any host that doesn't override them, so you
 # don't repeat e.g. "down: ssh" on every host.
 defaults:
