@@ -12,7 +12,7 @@ import uvicorn
 
 from . import __version__
 from .api import create_api
-from .config import load_config
+from .config import ensure_config, load_config
 from .keys import load_identity
 from .methods.ssh import ENV_SSH_KEY
 from .reload import DEFAULT_RELOAD_INTERVAL_SECONDS, ConfigStore, start_config_watcher
@@ -57,6 +57,12 @@ def main() -> None:
     args = build_parser().parse_args()
 
     _LOGGER.info("circadiand %s starting", __version__)
+    if ensure_config(args.config):
+        _LOGGER.warning(
+            "no config at %s — wrote a demo config from the sample; "
+            "edit it to describe your hosts",
+            args.config,
+        )
     _LOGGER.info("loading config from %s", args.config)
     config = load_config(args.config)
     _LOGGER.info("loaded %d host(s): %s", len(config.hosts), ", ".join(config.hosts))

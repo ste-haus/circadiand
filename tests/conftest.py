@@ -11,7 +11,7 @@ from circadiand.config import Config, Host
 from circadiand.methods.base import ACTION_DOWN, ACTION_UP, Method
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SAMPLE_CONFIG = REPO_ROOT / "config.sample.yaml"
+SAMPLE_CONFIG = REPO_ROOT / "circadiand" / "config.sample.yaml"
 
 
 class FakeMethod(Method):

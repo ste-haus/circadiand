@@ -35,7 +35,7 @@ def test_list_leaks_no_secrets(client):
 
 
 def test_up_uses_host_default(client, config):
-    resp = client.post("/up", json={"hostname": "nas"})
+    resp = client.post("/nas/up")
     assert resp.status_code == 200
     body = resp.json()
     assert body["method"] == "ipmi"  # nas default.up
@@ -45,38 +45,43 @@ def test_up_uses_host_default(client, config):
 
 
 def test_up_explicit_method(client):
-    resp = client.post("/up", json={"hostname": "nas", "method": "wol"})
+    resp = client.post("/nas/up", params={"method": "wol"})
     assert resp.status_code == 200
     assert resp.json()["method"] == "wol"
 
 
 def test_down_uses_global_default(client):
-    resp = client.post("/down", json={"hostname": "workstation"})
+    resp = client.post("/workstation/down")
     assert resp.status_code == 200
     assert resp.json()["method"] == "ssh"
 
 
 def test_unknown_host_404(client):
-    resp = client.post("/up", json={"hostname": "ghost"})
+    resp = client.post("/ghost/up")
     assert resp.status_code == 404
 
 
 def test_method_not_on_host_404(client):
-    resp = client.post("/up", json={"hostname": "workstation", "method": "ipmi"})
+    resp = client.post("/workstation/up", params={"method": "ipmi"})
     assert resp.status_code == 404
 
 
 def test_unsupported_action_400(client):
     # ssh supports down, not up
-    resp = client.post("/up", json={"hostname": "nas", "method": "ssh"})
+    resp = client.post("/nas/up", params={"method": "ssh"})
     assert resp.status_code == 400
+
+
+def test_invalid_action_422(client):
+    resp = client.post("/nas/sideways")
+    assert resp.status_code == 422
 
 
 def test_no_default_400():
     host = make_host("box", [FakeMethod("wol", "box", up=True)])
     config = Config(hosts={"box": host}, defaults={})
     client = TestClient(create_api(config))
-    resp = client.post("/down", json={"hostname": "box"})
+    resp = client.post("/box/down")
     assert resp.status_code == 400
 
 
@@ -87,14 +92,9 @@ def test_driver_failure_502():
     host = make_host("box", [failing], defaults={ACTION_DOWN: "ssh"})
     config = Config(hosts={"box": host}, defaults={})
     client = TestClient(create_api(config))
-    resp = client.post("/down", json={"hostname": "box"})
+    resp = client.post("/box/down")
     assert resp.status_code == 502
     assert "timeout" in resp.json()["detail"]
-
-
-def test_validation_error_422(client):
-    resp = client.post("/up", json={})  # missing hostname
-    assert resp.status_code == 422
 
 
 # --- auth --------------------------------------------------------------------
@@ -107,22 +107,18 @@ def _auth_client():
 
 def test_auth_required_when_token_set():
     client = _auth_client()
-    assert client.post("/up", json={"hostname": "box"}).status_code == 401
+    assert client.post("/box/up").status_code == 401
 
 
 def test_auth_wrong_token():
     client = _auth_client()
-    resp = client.post(
-        "/up", json={"hostname": "box"}, headers={"Authorization": "Bearer nope"}
-    )
+    resp = client.post("/box/up", headers={"Authorization": "Bearer nope"})
     assert resp.status_code == 401
 
 
 def test_auth_correct_token():
     client = _auth_client()
-    resp = client.post(
-        "/up", json={"hostname": "box"}, headers={"Authorization": "Bearer s3cret"}
-    )
+    resp = client.post("/box/up", headers={"Authorization": "Bearer s3cret"})
     assert resp.status_code == 200
 
 
@@ -131,7 +127,7 @@ def test_openapi_schema(client):
     assert resp.status_code == 200
     schema = resp.json()
     assert schema["info"]["title"] == "circadiand"
-    assert {"/list", "/up", "/down", "/public-key"} <= set(schema["paths"])
+    assert {"/list", "/public-key", "/{hostname}/{action}"} <= set(schema["paths"])
 
 
 # --- public key --------------------------------------------------------------
