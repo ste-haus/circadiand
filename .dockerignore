@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.venv
+tests
+__pycache__
+*.pyc
+*.egg-info
+.pytest_cache
+.coverage
+htmlcov
+.DS_Store
+config.yaml
+keys

@@ -1,0 +1,14 @@
+services:
+  circadiand:
+    image: ghcr.io/ste-haus/circadiand:latest
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      CIRCADIAND_CONFIG: /config/config.yaml
+      CIRCADIAND_SSH_KEY: /keys/circadiand
+      # CIRCADIAND_API_TOKEN: change-me   # set to require bearer auth
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./keys/circadiand:/keys/circadiand:ro
+    restart: unless-stopped
