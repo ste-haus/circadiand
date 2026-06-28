@@ -160,3 +160,22 @@ def test_public_key_404_when_unconfigured():
     config = Config(hosts={"box": host}, defaults={})
     client = TestClient(create_api(config))  # no public_key
     assert client.get("/public-key").status_code == 404
+
+
+# --- live reload via ConfigStore ---------------------------------------------
+
+def test_api_reflects_configstore_swap(tmp_path):
+    from circadiand.reload import ConfigStore
+
+    one = make_host("alpha", [FakeMethod("wol", "alpha", up=True)], {ACTION_UP: "wol"})
+    store = ConfigStore(tmp_path / "config.yaml", Config(hosts={"alpha": one}, defaults={}))
+    client = TestClient(create_api(store))
+
+    assert set(client.get("/list").json()) == {"alpha"}
+
+    # Swap the live config the way reload() does internally.
+    two_a = make_host("alpha", [FakeMethod("wol", "alpha", up=True)], {ACTION_UP: "wol"})
+    two_b = make_host("beta", [FakeMethod("wol", "beta", up=True)], {ACTION_UP: "wol"})
+    store._config = Config(hosts={"alpha": two_a, "beta": two_b}, defaults={})
+
+    assert set(client.get("/list").json()) == {"alpha", "beta"}

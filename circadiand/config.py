@@ -174,7 +174,10 @@ def load_config(path: str | Path) -> Config:
     if not config_path.is_file():
         raise ConfigError(f"config file not found: {config_path}")
 
-    raw = yaml.safe_load(config_path.read_text()) or {}
+    try:
+        raw = yaml.safe_load(config_path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"config file is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ConfigError("config root must be a mapping")
 

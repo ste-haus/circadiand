@@ -1,6 +1,6 @@
 """FastAPI application: /list, /up, /down with typed models and optional auth."""
 
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -12,6 +12,7 @@ from . import __version__
 from .config import Config
 from .errors import RequestError, UnsupportedAction
 from .methods import ACTION_DOWN, ACTION_UP, ACTIONS
+from .reload import ConfigStore
 
 APP_TITLE = "circadiand"
 APP_DESCRIPTION = (
@@ -68,12 +69,19 @@ def _resolved_defaults(config: Config, hostname: str) -> dict[str, str]:
 
 
 def create_api(
-    config: Config,
+    config: Union[Config, ConfigStore],
     api_token: Optional[str] = None,
     public_key: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title=APP_TITLE, version=__version__, description=APP_DESCRIPTION)
     bearer_scheme = HTTPBearer(auto_error=False)
+
+    # Accept a live ConfigStore (reloadable) or a fixed Config. Handlers always
+    # read the current config through this so live reloads take effect.
+    store = config if isinstance(config, ConfigStore) else None
+
+    def current() -> Config:
+        return store.config if store is not None else config
 
     async def require_auth(
         credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
@@ -91,7 +99,7 @@ def create_api(
         return JSONResponse(status_code=int(exc.status_code), content={"detail": str(exc)})
 
     async def _power(action: str, req: PowerRequest) -> ActionResult:
-        method = config.resolve(req.hostname, action, req.method)
+        method = current().resolve(req.hostname, action, req.method)
         if not method.supports(action):
             raise UnsupportedAction(method.TYPE, action)
         detail = await run_in_threadpool(method.run, action)
@@ -112,8 +120,9 @@ def create_api(
         summary="List configured hosts and their methods",
     )
     def list_hosts() -> dict[str, HostInfo]:
+        active = current()
         result: dict[str, HostInfo] = {}
-        for name, host in config.hosts.items():
+        for name, host in active.hosts.items():
             methods = [
                 MethodInfo(
                     type=method.TYPE,
@@ -122,7 +131,7 @@ def create_api(
                 for method in host.methods.values()
             ]
             result[name] = HostInfo(
-                methods=methods, defaults=_resolved_defaults(config, name)
+                methods=methods, defaults=_resolved_defaults(active, name)
             )
         return result
 
