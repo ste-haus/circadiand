@@ -93,6 +93,23 @@ Invalid config (unknown method type, duplicate type on a host, a default naming 
 
 The config file is watched for changes (mtime polling every `CIRCADIAND_RELOAD_INTERVAL` seconds, default 120; set to `0` to disable). On change, the host/method/defaults config is re-parsed and swapped in atomically with no restart and no dropped requests. A malformed edit is logged and the previous config is kept, so a bad file never takes the service down. The SSH identity is resolved once at startup and is **not** affected by reloads.
 
+## Networking
+
+**circadiand must run with host networking.** The `wol` method sends Wake-on-LAN magic packets to the LAN broadcast address (`255.255.255.255` or the subnet broadcast). Docker's default bridge network NATs egress and does not forward broadcast frames onto the physical LAN, so a magic packet sent from a bridged container never reaches the target NIC. Host networking puts the container directly on the host's L2 segment, where the broadcast propagates. IPMI and SSH are unicast and work fine under bridge networking — but since `wol` is the typical "power on" path, host networking is effectively required for the service to do its primary job.
+
+- **Docker**: `--network host` (Compose: `network_mode: host`). With host networking, port publishing (`-p`/`ports:`) is ignored — the service is reachable directly on the host at `CIRCADIAND_PORT` (default `8000`). Note that Docker Desktop on macOS/Windows runs containers in a VM, so host networking attaches to the VM's network, not the physical LAN; deploy on Linux for WOL to reach real hardware.
+- **Kubernetes**: set `hostNetwork: true` on the pod spec (and typically `dnsPolicy: ClusterFirstWithHostNet`). The pod then binds `CIRCADIAND_PORT` on the node and shares the node's broadcast domain.
+
+```yaml
+# Kubernetes pod spec excerpt
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  containers:
+    - name: circadiand
+      image: ghcr.io/ste-haus/circadiand:latest
+```
+
 ## Running
 
 Common tasks are in the [`Makefile`](Makefile) (`make help` to list them).
@@ -109,10 +126,12 @@ Docker:
 ```bash
 make docker-build             # builds ghcr.io/ste-haus/circadiand:{version,latest}
 mkdir -p config
-docker run --rm -p 8000:8000 \
+docker run --rm --network host \
   -v "$PWD/config:/config" \
   ghcr.io/ste-haus/circadiand:latest
 ```
+
+Host networking is required for Wake-on-LAN (see [Networking](#networking)); with `--network host`, port publishing is dropped and the service listens directly on `CIRCADIAND_PORT` (default `8000`).
 
 `/config` holds `config.yaml` and the SSH identity. On first start, with a writable mount and an empty `/config`, circadiand writes a demo `config.yaml` from the sample and generates an SSH keypair into `/config/circadiand[.pub]` (see [Identity](#identity)).
 
