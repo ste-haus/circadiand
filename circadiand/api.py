@@ -1,8 +1,9 @@
-"""FastAPI application: /list, /up, /down with typed models and optional auth."""
+"""FastAPI application: list/power/public-key routes with optional auth."""
 
+from enum import Enum
 from typing import Optional, Union
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -16,10 +17,15 @@ from .reload import ConfigStore
 
 APP_TITLE = "circadiand"
 APP_DESCRIPTION = (
-    "Power hosts on (Wake-on-LAN, IPMI) and off (SSH). "
-    "Methods are configured per host; the method is optional on /up and /down "
-    "and falls back to the host or global default."
+    "Power hosts up (Wake-on-LAN, IPMI) and down (SSH) via POST /{host}/{action}. "
+    "The method is an optional query param; it falls back to the host then "
+    "global default for the action."
 )
+
+
+class Action(str, Enum):
+    up = ACTION_UP
+    down = ACTION_DOWN
 
 TAG_HOSTS = "hosts"
 TAG_POWER = "power"
@@ -38,15 +44,6 @@ class HostInfo(BaseModel):
     defaults: dict[str, str] = Field(
         default_factory=dict,
         description="Resolved default method type per action (host or global).",
-    )
-
-
-class PowerRequest(BaseModel):
-    hostname: str = Field(..., description="Target host (must exist in config).")
-    method: Optional[str] = Field(
-        None,
-        description="Method type to use. Optional — falls back to the host then "
-        "global default for the action.",
     )
 
 
@@ -97,15 +94,6 @@ def create_api(
     @app.exception_handler(RequestError)
     async def _handle_request_error(_request: Request, exc: RequestError) -> JSONResponse:
         return JSONResponse(status_code=int(exc.status_code), content={"detail": str(exc)})
-
-    async def _power(action: str, req: PowerRequest) -> ActionResult:
-        method = current().resolve(req.hostname, action, req.method)
-        if not method.supports(action):
-            raise UnsupportedAction(method.TYPE, action)
-        detail = await run_in_threadpool(method.run, action)
-        return ActionResult(
-            hostname=req.hostname, method=method.TYPE, action=action, detail=detail
-        )
 
     error_responses = {
         status.HTTP_400_BAD_REQUEST: {"description": "Unsupported action or no default"},
@@ -160,25 +148,28 @@ def create_api(
         return public_key
 
     @app.post(
-        "/up",
+        "/{hostname}/{action}",
         response_model=ActionResult,
         tags=[TAG_POWER],
-        summary="Power a host on",
+        summary="Power a host up or down",
         responses=error_responses,
         dependencies=[Depends(require_auth)],
     )
-    async def power_up(req: PowerRequest) -> ActionResult:
-        return await _power(ACTION_UP, req)
-
-    @app.post(
-        "/down",
-        response_model=ActionResult,
-        tags=[TAG_POWER],
-        summary="Power a host off",
-        responses=error_responses,
-        dependencies=[Depends(require_auth)],
-    )
-    async def power_down(req: PowerRequest) -> ActionResult:
-        return await _power(ACTION_DOWN, req)
+    async def power(
+        hostname: str,
+        action: Action,
+        method: Optional[str] = Query(
+            None,
+            description="Method type to use. Optional — falls back to the host "
+            "then global default for the action.",
+        ),
+    ) -> ActionResult:
+        resolved = current().resolve(hostname, action.value, method)
+        if not resolved.supports(action.value):
+            raise UnsupportedAction(resolved.TYPE, action.value)
+        detail = await run_in_threadpool(resolved.run, action.value)
+        return ActionResult(
+            hostname=hostname, method=resolved.TYPE, action=action.value, detail=detail
+        )
 
     return app

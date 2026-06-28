@@ -4,14 +4,19 @@ A small REST service for powering hosts **on** (Wake-on-LAN, IPMI) and **off** (
 
 ## Endpoints
 
-| Method | Path | Body | Description |
-|--------|------|------|-------------|
-| GET | `/list` | — | List configured hosts, their methods/actions, and resolved defaults. |
-| GET | `/public-key` | — | Return the circadiand SSH public key as plaintext. |
-| POST | `/up` | `{"hostname": "...", "method": "..."?}` | Power a host on. |
-| POST | `/down` | `{"hostname": "...", "method": "..."?}` | Power a host off. |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/list` | List configured hosts, their methods/actions, and resolved defaults. |
+| GET | `/public-key` | Return the circadiand SSH public key as plaintext. |
+| POST | `/{host}/{action}?method={method}` | Power a host `up` or `down`. |
 
-`method` is optional on `/up` and `/down`. When omitted it resolves in order: explicit request → host `default.method.{up,down}` → global `defaults.method.{up,down}`. If nothing resolves the request is a 400.
+`action` is `up` or `down`. The `method` query param is optional; when omitted it resolves in order: explicit `?method=` → host `default.method.{up,down}` → global `defaults.method.{up,down}`. If nothing resolves the request is a 400. Examples:
+
+```bash
+curl -X POST localhost:8000/nas/up                 # uses nas's default up method
+curl -X POST localhost:8000/nas/up?method=wol      # force a specific method
+curl -X POST localhost:8000/workstation/down
+```
 
 Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw schema is at `/openapi.json`.
 
