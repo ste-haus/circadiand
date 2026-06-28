@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local runtime artifacts — never commit real config or keys
+config.yaml
+config/
+keys/
+*.pem
+*.key
+.DS_Store

@@ -1,0 +1,18 @@
+services:
+  circadiand:
+    image: ghcr.io/ste-haus/circadiand:latest
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      CIRCADIAND_CONFIG: /config/config.yaml
+      # CIRCADIAND_API_TOKEN: change-me   # set to require bearer auth
+      # Bring your own keypair by setting these (otherwise circadiand uses, or
+      # generates into, /config/circadiand[.pub]):
+      # CIRCADIAND_SSH_KEY: /config/circadiand
+      # CIRCADIAND_SSH_PUBLIC_KEY: /config/circadiand.pub   # defaults to ${CIRCADIAND_SSH_KEY}.pub
+    volumes:
+      # Writable /config: holds config.yaml and the SSH identity. If no keypair
+      # is present, one is generated here on first start.
+      - ./config:/config
+    restart: unless-stopped

@@ -1,0 +1,45 @@
+# circadiand configuration.
+#
+# Optional: where the circadiand SSH identity keypair lives. Defaults to this
+# config file's directory (circadiand + circadiand.pub). The CIRCADIAND_SSH_KEY /
+# CIRCADIAND_SSH_PUBLIC_KEY env vars override this. If the files don't exist,
+# a new ed25519 keypair is generated at the resolved location.
+# identity:
+#   private_key: /config/circadiand
+#   public_key: /config/circadiand.pub
+
+# Global method defaults apply to any host that doesn't override them, so you
+# don't repeat e.g. "down: ssh" on every host.
+defaults:
+  method:
+    up: wol
+    down: ssh
+
+hosts:
+  nas:
+    # Per-host override of the global defaults.
+    default:
+      method:
+        up: ipmi
+        down: ssh
+    methods:
+      - type: wol
+        mac: "aa:bb:cc:dd:ee:ff"
+        broadcast: "192.168.1.255"   # optional
+      - type: ipmi
+        host: "192.168.1.50"
+        username: "ADMIN"
+        password: "changeme"
+      - type: ssh
+        host: "192.168.1.10"
+        username: "circadiand"
+        # key_path defaults to $CIRCADIAND_SSH_KEY
+
+  workstation:
+    # No per-host default.method -> inherits defaults.method (up=wol, down=ssh).
+    methods:
+      - type: wol
+        mac: "11:22:33:44:55:66"
+      - type: ssh
+        host: "192.168.1.20"
+        username: "circadiand"
