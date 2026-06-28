@@ -15,12 +15,14 @@ from .api import create_api
 from .config import load_config
 from .keys import load_identity
 from .methods.ssh import ENV_SSH_KEY
+from .reload import DEFAULT_RELOAD_INTERVAL_SECONDS, ConfigStore, start_config_watcher
 from .utils import get_env_int, get_env_str
 
 ENV_CONFIG = "CIRCADIAND_CONFIG"
 ENV_HOST = "CIRCADIAND_HOST"
 ENV_PORT = "CIRCADIAND_PORT"
 ENV_API_TOKEN = "CIRCADIAND_API_TOKEN"
+ENV_RELOAD_INTERVAL = "CIRCADIAND_RELOAD_INTERVAL"
 
 DEFAULT_CONFIG_PATH = "/config/config.yaml"
 DEFAULT_HOST = "0.0.0.0"
@@ -73,7 +75,15 @@ def main() -> None:
     else:
         _LOGGER.warning("no %s set — endpoints are unauthenticated", ENV_API_TOKEN)
 
-    app = create_api(config, api_token=api_token, public_key=public_key)
+    store = ConfigStore(args.config, config)
+    reload_interval = get_env_int(ENV_RELOAD_INTERVAL, DEFAULT_RELOAD_INTERVAL_SECONDS)
+    if reload_interval > 0:
+        start_config_watcher(store, reload_interval)
+        _LOGGER.info("watching %s for changes every %ds", args.config, reload_interval)
+    else:
+        _LOGGER.info("config live-reload disabled (%s=0)", ENV_RELOAD_INTERVAL)
+
+    app = create_api(store, api_token=api_token, public_key=public_key)
     uvicorn.run(app, host=args.host, port=args.port)
 
 

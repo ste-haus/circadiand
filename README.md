@@ -82,6 +82,11 @@ Invalid config (unknown method type, duplicate type on a host, a default naming 
 | `CIRCADIAND_SSH_KEY` | — | Private key path override for the `circadiand` identity. If set, the file must exist. |
 | `CIRCADIAND_SSH_PUBLIC_KEY` | `${CIRCADIAND_SSH_KEY}.pub` | Public key path override (only used when `CIRCADIAND_SSH_KEY` is set). |
 | `CIRCADIAND_API_TOKEN` | — | If set, require `Authorization: Bearer <token>`. If unset, endpoints are open. |
+| `CIRCADIAND_RELOAD_INTERVAL` | `120` | Seconds between config-file change checks for live reload. Set to `0` to disable. |
+
+## Live reload
+
+The config file is watched for changes (mtime polling every `CIRCADIAND_RELOAD_INTERVAL` seconds, default 120; set to `0` to disable). On change, the host/method/defaults config is re-parsed and swapped in atomically with no restart and no dropped requests. A malformed edit is logged and the previous config is kept, so a bad file never takes the service down. The SSH identity is resolved once at startup and is **not** affected by reloads.
 
 ## Running
 
