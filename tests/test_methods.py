@@ -9,7 +9,7 @@ from circadiand.methods import METHOD_REGISTRY
 from circadiand.methods.ipmi import IpmiMethod
 from circadiand.methods.ping import PingMethod
 from circadiand.methods.ssh import ENV_SSH_KEY, SshMethod
-from circadiand.methods.wol import WolMethod
+from circadiand.methods.wol import WOL_PACKET_INTERVAL_SECONDS, WolMethod
 
 
 def test_registry_populated():
@@ -68,6 +68,7 @@ def test_wol_default_count(monkeypatch):
         "circadiand.methods.wol.wakeonlan.send_magic_packet",
         lambda mac, **kwargs: sends.append(mac),
     )
+    monkeypatch.setattr("circadiand.methods.wol.time.sleep", lambda _: None)
 
     wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff")
     wol.power_up()
@@ -81,12 +82,30 @@ def test_wol_count_override(monkeypatch):
         "circadiand.methods.wol.wakeonlan.send_magic_packet",
         lambda mac, **kwargs: sends.append(mac),
     )
+    monkeypatch.setattr("circadiand.methods.wol.time.sleep", lambda _: None)
 
     wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff", count=3)
     result = wol.power_up()
 
     assert len(sends) == 3
     assert "3" in result
+
+
+def test_wol_delays_between_packets(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(
+        "circadiand.methods.wol.wakeonlan.send_magic_packet",
+        lambda mac, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "circadiand.methods.wol.time.sleep", lambda seconds: sleeps.append(seconds)
+    )
+
+    wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff", count=3)
+    wol.power_up()
+
+    # One 100ms gap between each pair of packets, none before the first.
+    assert sleeps == [WOL_PACKET_INTERVAL_SECONDS] * 2
 
 
 def test_wol_requires_mac():
