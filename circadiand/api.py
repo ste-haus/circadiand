@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Optional, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -136,6 +136,11 @@ def create_api(
         status.HTTP_404_NOT_FOUND: {"description": "Host or method not found"},
         status.HTTP_502_BAD_GATEWAY: {"description": "Power method failed on target"},
     }
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        # Send the bare root to the interactive API docs (path per app.docs_url).
+        return RedirectResponse(url=app.docs_url)
 
     @app.get(
         "/list",
