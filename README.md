@@ -120,11 +120,18 @@ hosts:
 
 A background monitor runs one worker thread per monitored host, probing on the host's interval and recording the latest result. Workers are reconciled on live reload — adding, removing, or retiming a `health` block takes effect without a restart. If a global `health` default names a method a particular host doesn't define (or can't check), that host is skipped with a warning rather than failing startup; a per-host `health` naming a missing/incapable method **does** fail fast at load.
 
-`GET /{host}` returns the latest status:
+`GET /{host}` returns the latest status plus a rolling `samples` history — the recent probes, oldest first, bounded to the **last hour or 100 samples**, whichever is smaller (100 covers a full hour at intervals ≥ 36s; faster intervals are capped by count). It's kept in memory only, so it resets on restart.
 
 ```bash
 curl -s -w '\n%{http_code}\n' localhost:8000/nas
-# {"hostname":"nas","state":"alive","method":"ping","interval":5,"checked_at":"2026-07-01T12:00:00+00:00","detail":null}
+# {
+#   "hostname":"nas","state":"alive","method":"ping","interval":5,
+#   "checked_at":"2026-07-01T12:00:10+00:00","detail":null,
+#   "samples":[
+#     {"state":"dead","checked_at":"2026-07-01T12:00:05+00:00","detail":"nas is not responding to ping"},
+#     {"state":"alive","checked_at":"2026-07-01T12:00:10+00:00","detail":null}
+#   ]
+# }
 ```
 
 | State | HTTP | Meaning |

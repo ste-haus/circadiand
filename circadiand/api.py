@@ -57,6 +57,14 @@ class ActionResult(BaseModel):
     detail: str
 
 
+class HealthSampleInfo(BaseModel):
+    state: str = Field(..., description="Liveliness state at this probe.")
+    checked_at: str = Field(..., description="UTC ISO-8601 timestamp of the probe.")
+    detail: Optional[str] = Field(
+        None, description="Down or error message when not alive."
+    )
+
+
 class HostHealth(BaseModel):
     hostname: str
     state: str = Field(..., description="Liveliness state: alive, dead, or unknown.")
@@ -67,6 +75,10 @@ class HostHealth(BaseModel):
     )
     detail: Optional[str] = Field(
         None, description="Down or error message when the host is not alive."
+    )
+    samples: list[HealthSampleInfo] = Field(
+        default_factory=list,
+        description="Recent probes, oldest first — up to the last hour or 100 samples.",
     )
 
 
@@ -225,6 +237,12 @@ def create_api(
             interval=result.interval,
             checked_at=result.checked_at,
             detail=result.detail,
+            samples=[
+                HealthSampleInfo(
+                    state=s.state, checked_at=s.checked_at, detail=s.detail
+                )
+                for s in result.samples
+            ],
         )
 
     return app

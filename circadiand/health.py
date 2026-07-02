@@ -14,7 +14,8 @@ restart required.
 import dataclasses
 import logging
 import threading
-from datetime import datetime, timezone
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, Union
 
 from .config import Config
@@ -24,11 +25,24 @@ HEALTH_ALIVE = "alive"
 HEALTH_DEAD = "dead"
 HEALTH_UNKNOWN = "unknown"
 
+# Per-host rolling history: keep at most the last hour of probes, capped at 100
+# samples (whichever bound is hit first — 100 covers a full hour at intervals
+# >= 36s; faster intervals are capped by count).
+MAX_SAMPLES = 100
+MAX_SAMPLE_AGE_SECONDS = 3600
+
 _LOGGER = logging.getLogger("circadiand")
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@dataclasses.dataclass
+class HealthSample:
+    state: str                      # alive | dead | unknown
+    checked_at: str                 # UTC ISO-8601 of the probe
+    detail: Optional[str] = None    # down/error message when not alive
 
 
 @dataclasses.dataclass
@@ -38,6 +52,8 @@ class HealthStatus:
     interval: int                   # probe interval in seconds
     checked_at: Optional[str]       # UTC ISO-8601 of the last probe
     detail: Optional[str] = None    # down/error message when not alive
+    # Recent probes, oldest first (bounded to the last hour / MAX_SAMPLES).
+    samples: list[HealthSample] = dataclasses.field(default_factory=list)
 
 
 class _Worker:
@@ -74,6 +90,7 @@ class HealthMonitor:
         self._store = source if isinstance(source, ConfigStore) else None
         self._fixed = None if self._store is not None else source
         self._status: dict[str, HealthStatus] = {}
+        self._history: dict[str, deque[HealthSample]] = {}
         self._workers: dict[str, _Worker] = {}
         self._warned: set[str] = set()
         self._lock = threading.Lock()
@@ -81,9 +98,24 @@ class HealthMonitor:
     def _current(self) -> Config:
         return self._store.config if self._store is not None else self._fixed
 
+    @staticmethod
+    def _prune(history: "deque[HealthSample]") -> None:
+        """Drop samples older than the retention window (count is capped by the
+        deque's maxlen). Must be called with the lock held."""
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=MAX_SAMPLE_AGE_SECONDS)
+        while history and datetime.fromisoformat(history[0].checked_at) < cutoff:
+            history.popleft()
+
     def get(self, hostname: str) -> Optional[HealthStatus]:
         with self._lock:
-            return self._status.get(hostname)
+            status = self._status.get(hostname)
+            if status is None:
+                return None
+            history = self._history.get(hostname)
+            if history is not None:
+                self._prune(history)
+            samples = list(history) if history else []
+            return dataclasses.replace(status, samples=samples)
 
     def start(self) -> None:
         """Begin monitoring and reconcile on every future config reload."""
@@ -101,32 +133,33 @@ class HealthMonitor:
         """Probe one host once and record the result. Never raises."""
         resolved = self._current().resolve_health(hostname)
         if resolved is None:
-            # No longer monitored (config changed under us) — drop stale status.
+            # No longer monitored (config changed under us) — drop stale state.
             with self._lock:
                 self._status.pop(hostname, None)
+                self._history.pop(hostname, None)
             return
         method, interval = resolved
         try:
             alive = method.check()
         except Exception as exc:  # a probe that can't run -> unknown, worker lives
-            status = HealthStatus(
-                state=HEALTH_UNKNOWN, method=method.TYPE, interval=interval,
-                checked_at=_now_iso(), detail=str(exc),
-            )
+            state, detail = HEALTH_UNKNOWN, str(exc)
         else:
             if alive:
-                status = HealthStatus(
-                    state=HEALTH_ALIVE, method=method.TYPE, interval=interval,
-                    checked_at=_now_iso(),
-                )
+                state, detail = HEALTH_ALIVE, None
             else:
-                status = HealthStatus(
-                    state=HEALTH_DEAD, method=method.TYPE, interval=interval,
-                    checked_at=_now_iso(),
-                    detail=f"{hostname} is not responding to {method.TYPE}",
-                )
+                state, detail = HEALTH_DEAD, f"{hostname} is not responding to {method.TYPE}"
+
+        checked_at = _now_iso()
+        status = HealthStatus(
+            state=state, method=method.TYPE, interval=interval,
+            checked_at=checked_at, detail=detail,
+        )
+        sample = HealthSample(state=state, checked_at=checked_at, detail=detail)
         with self._lock:
             self._status[hostname] = status
+            history = self._history.setdefault(hostname, deque(maxlen=MAX_SAMPLES))
+            history.append(sample)
+            self._prune(history)
 
     def reconcile(self) -> None:
         """Align running workers with the hosts the current config wants probed."""
@@ -159,6 +192,7 @@ class HealthMonitor:
                     del self._workers[hostname]
                     if signature is None:
                         self._status.pop(hostname, None)
+                        self._history.pop(hostname, None)
 
             for hostname, (method_type, interval) in desired.items():
                 if hostname not in self._workers:

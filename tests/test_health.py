@@ -1,10 +1,19 @@
 """HealthMonitor probe logic and worker reconciliation (no real network I/O)."""
 
 import time
+from datetime import datetime, timedelta, timezone
 
 from circadiand.config import Config, Health
 from circadiand.errors import ExecutionError
-from circadiand.health import HEALTH_ALIVE, HEALTH_DEAD, HEALTH_UNKNOWN, HealthMonitor
+from circadiand.health import (
+    HEALTH_ALIVE,
+    HEALTH_DEAD,
+    HEALTH_UNKNOWN,
+    MAX_SAMPLE_AGE_SECONDS,
+    MAX_SAMPLES,
+    HealthMonitor,
+    HealthSample,
+)
 from circadiand.reload import ConfigStore
 
 from .conftest import FakeMethod, make_host
@@ -117,6 +126,50 @@ def test_reconcile_skips_inapplicable_global_health():
     try:
         assert "vm" not in monitor._workers
         assert monitor.get("vm") is None
+    finally:
+        monitor.stop()
+
+
+# --- rolling history ---------------------------------------------------------
+
+def test_history_accumulates_samples():
+    monitor = HealthMonitor(_config(alive=True))
+    for _ in range(3):
+        monitor._run_check("nas")
+    samples = monitor.get("nas").samples
+    assert len(samples) == 3
+    assert all(s.state == HEALTH_ALIVE for s in samples)
+
+
+def test_history_capped_at_max_samples():
+    monitor = HealthMonitor(_config(alive=True))
+    for _ in range(MAX_SAMPLES + 5):
+        monitor._run_check("nas")
+    assert len(monitor.get("nas").samples) == MAX_SAMPLES
+
+
+def test_history_prunes_samples_older_than_window():
+    monitor = HealthMonitor(_config(alive=True))
+    monitor._run_check("nas")  # one fresh sample
+    stale_ts = (
+        datetime.now(timezone.utc) - timedelta(seconds=MAX_SAMPLE_AGE_SECONDS + 60)
+    ).isoformat()
+    monitor._history["nas"].appendleft(HealthSample(HEALTH_ALIVE, stale_ts))
+    samples = monitor.get("nas").samples
+    assert len(samples) == 1
+    assert all(s.checked_at != stale_ts for s in samples)
+
+
+def test_history_dropped_when_health_removed():
+    store = ConfigStore("/nonexistent", _config())
+    monitor = HealthMonitor(store)
+    monitor.start()
+    try:
+        _wait_for_status(monitor, "nas")
+        host = make_host("nas", [FakeMethod("ping", "nas", check=True)])
+        store._config = Config(hosts={"nas": host}, defaults={})
+        monitor.reconcile()
+        assert "nas" not in monitor._history
     finally:
         monitor.stop()
 

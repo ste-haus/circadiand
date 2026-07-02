@@ -5,7 +5,13 @@ from fastapi.testclient import TestClient
 from circadiand.api import create_api
 from circadiand.config import Config
 from circadiand.errors import ExecutionError
-from circadiand.health import HEALTH_ALIVE, HEALTH_DEAD, HEALTH_UNKNOWN, HealthStatus
+from circadiand.health import (
+    HEALTH_ALIVE,
+    HEALTH_DEAD,
+    HEALTH_UNKNOWN,
+    HealthSample,
+    HealthStatus,
+)
 from circadiand.methods.base import ACTION_DOWN, ACTION_UP
 
 from .conftest import FAKE_PUBLIC_KEY, FakeMethod, make_host
@@ -234,6 +240,22 @@ def test_health_not_configured_404(config):
 def test_health_no_monitor_404(client):
     # The default client fixture wires no health monitor.
     assert client.get("/nas").status_code == 404
+
+
+def test_health_includes_recent_samples(config):
+    samples = [
+        HealthSample(HEALTH_DEAD, "2026-07-01T00:00:00+00:00", "was down"),
+        HealthSample(HEALTH_ALIVE, "2026-07-01T00:00:10+00:00"),
+    ]
+    status = HealthStatus(
+        HEALTH_ALIVE, "ping", 5, "2026-07-01T00:00:10+00:00", None, samples
+    )
+    resp = _health_client(config, {"nas": status}).get("/nas")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [s["state"] for s in body["samples"]] == ["dead", "alive"]
+    assert body["samples"][0]["detail"] == "was down"
+    assert body["samples"][0]["checked_at"] == "2026-07-01T00:00:00+00:00"
 
 
 def test_health_route_does_not_shadow_list(config):
