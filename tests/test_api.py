@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from circadiand.api import create_api
 from circadiand.config import Config
 from circadiand.errors import ExecutionError
+from circadiand.health import HEALTH_ALIVE, HEALTH_DEAD, HEALTH_UNKNOWN, HealthStatus
 from circadiand.methods.base import ACTION_DOWN, ACTION_UP
 
 from .conftest import FAKE_PUBLIC_KEY, FakeMethod, make_host
@@ -175,3 +176,68 @@ def test_api_reflects_configstore_swap(tmp_path):
     store._config = Config(hosts={"alpha": two_a, "beta": two_b}, defaults={})
 
     assert set(client.get("/list").json()) == {"alpha", "beta"}
+
+
+# --- health status: GET /{hostname} ------------------------------------------
+
+class _FakeMonitor:
+    def __init__(self, statuses: dict[str, HealthStatus]):
+        self._statuses = statuses
+
+    def get(self, hostname):
+        return self._statuses.get(hostname)
+
+
+def _health_client(config, statuses):
+    return TestClient(create_api(config, health_monitor=_FakeMonitor(statuses)))
+
+
+def test_health_alive_200(config):
+    status = HealthStatus(HEALTH_ALIVE, "ping", 5, "2026-07-01T00:00:00+00:00")
+    resp = _health_client(config, {"nas": status}).get("/nas")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == "alive"
+    assert body["method"] == "ping"
+    assert body["interval"] == 5
+    assert body["detail"] is None
+
+
+def test_health_dead_503_with_detail(config):
+    status = HealthStatus(
+        HEALTH_DEAD, "ping", 5, "2026-07-01T00:00:00+00:00",
+        "nas is not responding to ping",
+    )
+    resp = _health_client(config, {"nas": status}).get("/nas")
+    assert resp.status_code == 503
+    assert "not responding" in resp.json()["detail"]
+
+
+def test_health_unknown_503(config):
+    status = HealthStatus(HEALTH_UNKNOWN, "ping", 5, None, "permission denied")
+    resp = _health_client(config, {"nas": status}).get("/nas")
+    assert resp.status_code == 503
+    assert resp.json()["state"] == "unknown"
+
+
+def test_health_unknown_host_404(config):
+    resp = _health_client(config, {}).get("/ghost")
+    assert resp.status_code == 404
+
+
+def test_health_not_configured_404(config):
+    # nas exists but has no health status recorded.
+    resp = _health_client(config, {}).get("/nas")
+    assert resp.status_code == 404
+
+
+def test_health_no_monitor_404(client):
+    # The default client fixture wires no health monitor.
+    assert client.get("/nas").status_code == 404
+
+
+def test_health_route_does_not_shadow_list(config):
+    # /list must still resolve to the list handler, not the health handler.
+    resp = _health_client(config, {}).get("/list")
+    assert resp.status_code == 200
+    assert set(resp.json()) == {"nas", "workstation"}

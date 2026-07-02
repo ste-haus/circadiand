@@ -19,4 +19,7 @@ RUN uv pip install --system --no-cache . \
 
 EXPOSE 8000
 
+# The `ping` health method sends ICMP echo requests via icmplib (pure Python, no
+# extra apt packages). It uses raw sockets, which need root or CAP_NET_RAW — the
+# container runs as root by default, so this works out of the box.
 CMD ["python", "-m", "circadiand"]

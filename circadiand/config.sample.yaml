@@ -9,11 +9,16 @@
 #   public_key: /config/circadiand.pub
 
 # Global method defaults apply to any host that doesn't override them, so you
-# don't repeat e.g. "down: ssh" on every host.
+# don't repeat e.g. "down: ssh" on every host. A global health default works the
+# same way: any host that defines the named method (and doesn't override health)
+# is monitored with it.
 defaults:
   method:
     up: wol
     down: ssh
+  health:
+    type: ping
+    interval: 10                     # optional, seconds between probes (default 10)
 
 hosts:
   nas:
@@ -22,10 +27,14 @@ hosts:
       method:
         up: ipmi
         down: ssh
+      health:
+        type: ping
+        interval: 5                  # probe the nas more often than the default
     methods:
       - type: wol
         mac: "aa:bb:cc:dd:ee:ff"
         broadcast: "192.168.1.255"   # optional
+        count: 10                    # optional, magic packets to send (default 10)
       - type: ipmi
         host: "192.168.1.50"
         username: "ADMIN"
@@ -34,12 +43,17 @@ hosts:
         host: "192.168.1.10"
         username: "circadiand"
         # key_path defaults to $CIRCADIAND_SSH_KEY
+      - type: ping
+        host: "192.168.1.10"         # liveliness only; can't power up/down
 
   workstation:
-    # No per-host default.method -> inherits defaults.method (up=wol, down=ssh).
+    # No per-host default -> inherits defaults.method (up=wol, down=ssh) and the
+    # global health default (ping) because it defines a ping method below.
     methods:
       - type: wol
         mac: "11:22:33:44:55:66"
       - type: ssh
         host: "192.168.1.20"
         username: "circadiand"
+      - type: ping
+        host: "192.168.1.20"

@@ -16,6 +16,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 from .config import Config, load_config
 from .errors import ConfigError
@@ -31,10 +32,19 @@ class ConfigStore:
     def __init__(self, path: str | Path, config: Config):
         self.path = Path(path)
         self._config = config
+        self._listeners: list[Callable[[], None]] = []
 
     @property
     def config(self) -> Config:
         return self._config
+
+    def add_listener(self, callback: Callable[[], None]) -> None:
+        """Register a callback invoked after each successful config swap.
+
+        Used by the health monitor to reconcile its workers when hosts or their
+        health config change on reload.
+        """
+        self._listeners.append(callback)
 
     def reload(self) -> bool:
         """Re-parse the config file. On success swap it in and return True; on a
@@ -50,6 +60,11 @@ class ConfigStore:
             len(new_config.hosts),
             ", ".join(new_config.hosts),
         )
+        for listener in self._listeners:
+            try:
+                listener()
+            except Exception:  # a bad listener must not break reloading
+                _LOGGER.exception("config reload listener failed")
         return True
 
 

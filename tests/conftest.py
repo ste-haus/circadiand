@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from circadiand.api import create_api
 from circadiand.config import Config, Host
-from circadiand.methods.base import ACTION_DOWN, ACTION_UP, Method
+from circadiand.methods.base import ACTION_CHECK, ACTION_DOWN, ACTION_UP, Method
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_CONFIG = REPO_ROOT / "circadiand" / "config.sample.yaml"
@@ -23,15 +23,19 @@ class FakeMethod(Method):
         hostname: str = "host",
         up: bool = False,
         down: bool = False,
+        check: bool = False,
         result: Optional[str] = None,
         raises: Optional[Exception] = None,
+        alive: bool = True,
     ):
         super().__init__(hostname)
         self.TYPE = method_type
         self.SUPPORTS_UP = up
         self.SUPPORTS_DOWN = down
+        self.SUPPORTS_CHECK = check
         self._result = result if result is not None else f"{method_type} ran"
         self._raises = raises
+        self._alive = alive
         self.calls: list[str] = []
 
     def power_up(self) -> str:
@@ -39,6 +43,12 @@ class FakeMethod(Method):
 
     def power_down(self) -> str:
         return self._act(ACTION_DOWN)
+
+    def check(self) -> bool:
+        self.calls.append(ACTION_CHECK)
+        if self._raises is not None:
+            raise self._raises
+        return self._alive
 
     def _act(self, action: str) -> str:
         self.calls.append(action)

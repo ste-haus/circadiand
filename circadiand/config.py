@@ -33,7 +33,7 @@ from typing import Any, Optional
 import yaml
 
 from .errors import ConfigError, HostNotFound, MethodNotFound, NoDefaultMethod
-from .methods import ACTIONS, METHOD_REGISTRY, Method
+from .methods import ACTION_CHECK, ACTIONS, METHOD_REGISTRY, Method
 
 SAMPLE_CONFIG_FILENAME = "config.sample.yaml"
 
@@ -46,6 +46,10 @@ KEY_TYPE = "type"
 KEY_IDENTITY = "identity"
 KEY_PRIVATE_KEY = "private_key"
 KEY_PUBLIC_KEY = "public_key"
+KEY_HEALTH = "health"
+KEY_INTERVAL = "interval"
+
+DEFAULT_HEALTH_INTERVAL_SECONDS = 10
 
 
 @dataclasses.dataclass
@@ -58,10 +62,19 @@ class Identity:
 
 
 @dataclasses.dataclass
+class Health:
+    """Liveliness-check config: which method type to probe with, how often."""
+
+    type: str
+    interval: int = DEFAULT_HEALTH_INTERVAL_SECONDS
+
+
+@dataclasses.dataclass
 class Host:
     name: str
     methods: dict[str, Method]          # method type -> instance
     defaults: dict[str, str]            # action -> method type (subset of ACTIONS)
+    health: Optional[Health] = None     # per-host health override
 
 
 @dataclasses.dataclass
@@ -69,6 +82,7 @@ class Config:
     hosts: dict[str, Host]
     defaults: dict[str, str]            # global action -> method type fallback
     identity: Identity = dataclasses.field(default_factory=Identity)
+    health: Optional[Health] = None     # global health fallback
 
     def get_host(self, hostname: str) -> Host:
         host = self.hosts.get(hostname)
@@ -95,6 +109,23 @@ class Config:
             raise MethodNotFound(hostname, method_type)
         return method
 
+    def resolve_health(self, hostname: str) -> Optional[tuple[Method, int]]:
+        """Resolve the (method, interval) to health-check a host, or None.
+
+        Order: per-host health -> global health. Returns None when no health is
+        configured, or when a *global* health default names a method this host
+        doesn't define or that can't check (per-host health is validated at load
+        time, so this only skips inapplicable globals — the caller warns).
+        """
+        host = self.get_host(hostname)
+        health = host.health or self.health
+        if health is None:
+            return None
+        method = host.methods.get(health.type)
+        if method is None or not method.supports(ACTION_CHECK):
+            return None
+        return method, health.interval
+
 
 def _parse_method_defaults(block: Any, where: str) -> dict[str, str]:
     """Parse a ``default``/``defaults`` block into {action: method_type}."""
@@ -116,6 +147,36 @@ def _parse_method_defaults(block: Any, where: str) -> dict[str, str]:
             )
         result[action] = method_type
     return result
+
+
+def _parse_health(block: Any, where: str) -> Optional[Health]:
+    """Parse the ``health`` sub-block of a ``default``/``defaults`` block.
+
+    Validates shape only (a non-empty ``type`` string and a positive integer
+    ``interval``, defaulting to 10). Whether the ``type`` is a usable method is
+    validated by the caller, which has the relevant method scope.
+    """
+    if block is None:
+        return None
+    if not isinstance(block, dict):
+        raise ConfigError(f"{where} block must be a mapping")
+    health_block = block.get(KEY_HEALTH)
+    if health_block is None:
+        return None
+    if not isinstance(health_block, dict):
+        raise ConfigError(f"{where} '{KEY_HEALTH}' must be a mapping")
+
+    health_type = health_block.get(KEY_TYPE)
+    if not health_type or not isinstance(health_type, str):
+        raise ConfigError(f"{where} '{KEY_HEALTH}' is missing a string '{KEY_TYPE}'")
+
+    interval = health_block.get(KEY_INTERVAL, DEFAULT_HEALTH_INTERVAL_SECONDS)
+    if not isinstance(interval, int) or isinstance(interval, bool) or interval <= 0:
+        raise ConfigError(
+            f"{where} '{KEY_HEALTH}.{KEY_INTERVAL}' must be a positive integer"
+        )
+
+    return Health(type=health_type, interval=interval)
 
 
 def _parse_identity(block: Any) -> Identity:
@@ -160,7 +221,8 @@ def _parse_host(name: str, block: Any) -> Host:
         params = {k: v for k, v in entry.items() if k != KEY_TYPE}
         methods[method_type] = method_cls(hostname=name, **params)
 
-    defaults = _parse_method_defaults(block.get(KEY_DEFAULT), f"host '{name}'")
+    default_block = block.get(KEY_DEFAULT)
+    defaults = _parse_method_defaults(default_block, f"host '{name}'")
     for action, method_type in defaults.items():
         if method_type not in methods:
             raise ConfigError(
@@ -168,7 +230,21 @@ def _parse_host(name: str, block: Any) -> Host:
                 f"but that method is not defined on the host"
             )
 
-    return Host(name=name, methods=methods, defaults=defaults)
+    health = _parse_health(default_block, f"host '{name}'")
+    if health is not None:
+        method = methods.get(health.type)
+        if method is None:
+            raise ConfigError(
+                f"host '{name}' health type is '{health.type}' "
+                f"but that method is not defined on the host"
+            )
+        if not method.supports(ACTION_CHECK):
+            raise ConfigError(
+                f"host '{name}' health type '{health.type}' "
+                f"does not support liveliness checks"
+            )
+
+    return Host(name=name, methods=methods, defaults=defaults, health=health)
 
 
 def sample_config_text() -> str:
@@ -202,13 +278,29 @@ def load_config(path: str | Path) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError("config root must be a mapping")
 
-    global_defaults = _parse_method_defaults(raw.get(KEY_DEFAULTS), KEY_DEFAULTS)
+    defaults_block = raw.get(KEY_DEFAULTS)
+    global_defaults = _parse_method_defaults(defaults_block, KEY_DEFAULTS)
     for action, method_type in global_defaults.items():
         if method_type not in METHOD_REGISTRY:
             known = ", ".join(sorted(METHOD_REGISTRY)) or "none"
             raise ConfigError(
                 f"{KEY_DEFAULTS} for '{action}' is unknown method type "
                 f"'{method_type}' (known types: {known})"
+            )
+
+    global_health = _parse_health(defaults_block, KEY_DEFAULTS)
+    if global_health is not None:
+        method_cls = METHOD_REGISTRY.get(global_health.type)
+        if method_cls is None:
+            known = ", ".join(sorted(METHOD_REGISTRY)) or "none"
+            raise ConfigError(
+                f"{KEY_DEFAULTS} health is unknown method type "
+                f"'{global_health.type}' (known types: {known})"
+            )
+        if not method_cls.SUPPORTS_CHECK:
+            raise ConfigError(
+                f"{KEY_DEFAULTS} health type '{global_health.type}' "
+                f"does not support liveliness checks"
             )
 
     hosts_block = raw.get(KEY_HOSTS)
@@ -218,4 +310,9 @@ def load_config(path: str | Path) -> Config:
     identity = _parse_identity(raw.get(KEY_IDENTITY))
 
     hosts = {name: _parse_host(name, block) for name, block in hosts_block.items()}
-    return Config(hosts=hosts, defaults=global_defaults, identity=identity)
+    return Config(
+        hosts=hosts,
+        defaults=global_defaults,
+        identity=identity,
+        health=global_health,
+    )

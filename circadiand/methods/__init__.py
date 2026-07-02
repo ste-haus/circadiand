@@ -6,6 +6,7 @@ importing it below.
 """
 
 from .base import (
+    ACTION_CHECK,
     ACTION_DOWN,
     ACTION_UP,
     ACTIONS,
@@ -16,9 +17,10 @@ from .base import (
 )
 
 # Import side effects register each method via the @register decorator.
-from . import ipmi, ssh, wol  # noqa: E402,F401
+from . import ipmi, ping, ssh, wol  # noqa: E402,F401
 
 __all__ = [
+    "ACTION_CHECK",
     "ACTION_DOWN",
     "ACTION_UP",
     "ACTIONS",

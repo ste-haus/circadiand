@@ -8,6 +8,7 @@ A small REST service for powering hosts **on** (Wake-on-LAN, IPMI) and **off** (
 |--------|------|-------------|
 | GET | `/list` | List configured hosts, their methods/actions, and resolved defaults. |
 | GET | `/public-key` | Return the circadiand SSH public key as plaintext. |
+| GET | `/{host}` | Return the host's latest liveliness status (see [Health checks](#health-checks)). |
 | POST | `/{host}/{action}?method={method}` | Power a host `up` or `down`. |
 
 `action` is `up` or `down`. The `method` query param is optional; when omitted it resolves in order: explicit `?method=` → host `default.method.{up,down}` → global `defaults.method.{up,down}`. If nothing resolves the request is a 400. Examples:
@@ -27,8 +28,11 @@ Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw sc
 | `wol` | up | [`wakeonlan`](https://pypi.org/project/wakeonlan/) | `mac` (`broadcast`, `port` optional) |
 | `ipmi` | up | [`pyghmi`](https://pypi.org/project/pyghmi/) | `host`, `username`, `password` |
 | `ssh` | down | [`paramiko`](https://pypi.org/project/paramiko/) | `host` (`username`, `port`, `key_path`, `shutdown_command` optional) |
+| `ping` | check | [`icmplib`](https://pypi.org/project/icmplib/) | `host` (`count`, `timeout`, `privileged` optional) |
 
 > IPMI power-off is implemented but disabled (`SUPPORTS_OFF = False`) until needed.
+
+The `ping` method only probes liveliness — it can't power a host up or down. It's meant to be named by a host's `health` config (see [Health checks](#health-checks)). ICMP uses raw sockets, so the process needs root or `CAP_NET_RAW`; the Docker image runs as root, so it works out of the box.
 
 ## Identity
 
@@ -92,6 +96,44 @@ Invalid config (unknown method type, duplicate type on a host, a default naming 
 ## Live reload
 
 The config file is watched for changes (mtime polling every `CIRCADIAND_RELOAD_INTERVAL` seconds, default 120; set to `0` to disable). On change, the host/method/defaults config is re-parsed and swapped in atomically with no restart and no dropped requests. A malformed edit is logged and the previous config is kept, so a bad file never takes the service down. The SSH identity is resolved once at startup and is **not** affected by reloads.
+
+## Health checks
+
+A host can be monitored for liveliness by adding a `health` block — at the top-level `defaults` (applies to any host that defines the named method and doesn't override it) or under a host's `default` (per-host override). `type` names one of the host's configured methods that supports checking (currently `ping`); `interval` is the seconds between probes and defaults to **10**.
+
+```yaml
+defaults:
+  health:
+    type: ping
+    interval: 10
+hosts:
+  nas:
+    default:
+      health:
+        type: ping
+        interval: 5      # probe the nas every 5s instead of the default 10
+    methods:
+      - type: ping
+        host: "192.168.1.10"
+      # ... power methods ...
+```
+
+A background monitor runs one worker thread per monitored host, probing on the host's interval and recording the latest result. Workers are reconciled on live reload — adding, removing, or retiming a `health` block takes effect without a restart. If a global `health` default names a method a particular host doesn't define (or can't check), that host is skipped with a warning rather than failing startup; a per-host `health` naming a missing/incapable method **does** fail fast at load.
+
+`GET /{host}` returns the latest status:
+
+```bash
+curl -s -w '\n%{http_code}\n' localhost:8000/nas
+# {"hostname":"nas","state":"alive","method":"ping","interval":5,"checked_at":"2026-07-01T12:00:00+00:00","detail":null}
+```
+
+| State | HTTP | Meaning |
+|-------|------|---------|
+| `alive` | 200 | The last probe reached the host. |
+| `dead` | 503 | The last probe ran and the host was unreachable (`detail` carries the message). |
+| `unknown` | 503 | The probe itself couldn't run (e.g. name resolution / permission error) or hasn't run yet. |
+
+A known host with **no** health configured returns `404`, as does an unknown host. Like `/list` and `/public-key`, `GET /{host}` is unauthenticated even when `CIRCADIAND_API_TOKEN` is set.
 
 ## Running
 
