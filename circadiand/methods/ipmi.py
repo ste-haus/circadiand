@@ -21,8 +21,12 @@ class IpmiMethod(Method):
     Down is implemented but ``SUPPORTS_DOWN`` is False for now (out of scope), so
     the API gates it before it can run.
 
+    Unlike ssh/ping, ipmi does *not* inherit the host-level ``host``: a BMC has
+    its own management NIC and IP, distinct from the machine's OS address, so it
+    carries its own required ``host``.
+
     Config:
-        host:     BMC address (required)
+        host:     BMC address (required — the management IP, not the OS address)
         username: BMC user (required)
         password: BMC password (required, never logged)
     """

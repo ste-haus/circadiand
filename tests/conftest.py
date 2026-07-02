@@ -57,11 +57,11 @@ class FakeMethod(Method):
         return self._result
 
 
-def make_host(name: str, methods: list[Method], defaults: Optional[dict] = None) -> Host:
+def make_host(name: str, methods: list[Method], power: Optional[dict] = None) -> Host:
     return Host(
         name=name,
         methods={m.TYPE: m for m in methods},
-        defaults=defaults or {},
+        power=power or {},
     )
 
 
@@ -74,7 +74,7 @@ def config() -> Config:
             FakeMethod("ipmi", "nas", up=True, result="ipmi on"),
             FakeMethod("ssh", "nas", down=True, result="ssh shutdown"),
         ],
-        defaults={ACTION_UP: "ipmi", ACTION_DOWN: "ssh"},
+        power={ACTION_UP: "ipmi", ACTION_DOWN: "ssh"},
     )
     workstation = make_host(
         "workstation",
@@ -85,7 +85,7 @@ def config() -> Config:
     )
     return Config(
         hosts={"nas": nas, "workstation": workstation},
-        defaults={ACTION_UP: "wol", ACTION_DOWN: "ssh"},
+        power={ACTION_UP: "wol", ACTION_DOWN: "ssh"},
     )
 
 

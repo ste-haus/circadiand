@@ -27,7 +27,8 @@ class SshMethod(Method):
     """Power a host off by running a shutdown command over SSH.
 
     Config:
-        host:             target address (required)
+        host:             target address. Normally inherited from the host-level
+                          ``host`` field; only set here to override it.
         username:         SSH user (optional, default "circadiand")
         port:             SSH port (optional, default 22)
         key_path:         per-method private key override (optional). When unset,
@@ -39,6 +40,7 @@ class SshMethod(Method):
 
     TYPE = "ssh"
     SUPPORTS_DOWN = True
+    USES_SHARED_HOST = True
 
     def __init__(self, hostname: str, **config: Any):
         super().__init__(hostname, **config)

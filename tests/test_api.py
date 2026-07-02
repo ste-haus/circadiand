@@ -27,10 +27,10 @@ def test_list(client):
     types = {m["type"]: m["actions"] for m in nas["methods"]}
     assert types["wol"] == ["up"]
     assert types["ssh"] == ["down"]
-    assert nas["defaults"] == {"up": "ipmi", "down": "ssh"}
+    assert nas["power"] == {"up": "ipmi", "down": "ssh"}
 
     # workstation has no per-host default -> resolves from the global defaults
-    assert body["workstation"]["defaults"] == {"up": "wol", "down": "ssh"}
+    assert body["workstation"]["power"] == {"up": "wol", "down": "ssh"}
 
 
 def test_list_leaks_no_secrets(client):
@@ -86,7 +86,7 @@ def test_invalid_action_422(client):
 
 def test_no_default_400():
     host = make_host("box", [FakeMethod("wol", "box", up=True)])
-    config = Config(hosts={"box": host}, defaults={})
+    config = Config(hosts={"box": host}, power={})
     client = TestClient(create_api(config))
     resp = client.post("/box/down")
     assert resp.status_code == 400
@@ -96,8 +96,8 @@ def test_driver_failure_502():
     failing = FakeMethod(
         "ssh", "box", down=True, raises=ExecutionError("ssh", "down", "timeout")
     )
-    host = make_host("box", [failing], defaults={ACTION_DOWN: "ssh"})
-    config = Config(hosts={"box": host}, defaults={})
+    host = make_host("box", [failing], power={ACTION_DOWN: "ssh"})
+    config = Config(hosts={"box": host}, power={})
     client = TestClient(create_api(config))
     resp = client.post("/box/down")
     assert resp.status_code == 502
@@ -108,7 +108,7 @@ def test_driver_failure_502():
 
 def _auth_client():
     host = make_host("box", [FakeMethod("wol", "box", up=True)], {ACTION_UP: "wol"})
-    config = Config(hosts={"box": host}, defaults={})
+    config = Config(hosts={"box": host}, power={})
     return TestClient(create_api(config, api_token="s3cret"))
 
 
@@ -148,7 +148,7 @@ def test_public_key_returns_plaintext(client):
 
 def test_public_key_unauthenticated_even_with_token():
     host = make_host("box", [FakeMethod("wol", "box", up=True)], {ACTION_UP: "wol"})
-    config = Config(hosts={"box": host}, defaults={})
+    config = Config(hosts={"box": host}, power={})
     client = TestClient(
         create_api(config, api_token="s3cret", public_key=FAKE_PUBLIC_KEY)
     )
@@ -160,7 +160,7 @@ def test_public_key_unauthenticated_even_with_token():
 
 def test_public_key_404_when_unconfigured():
     host = make_host("box", [FakeMethod("wol", "box", up=True)], {ACTION_UP: "wol"})
-    config = Config(hosts={"box": host}, defaults={})
+    config = Config(hosts={"box": host}, power={})
     client = TestClient(create_api(config))  # no public_key
     assert client.get("/public-key").status_code == 404
 
@@ -171,7 +171,7 @@ def test_api_reflects_configstore_swap(tmp_path):
     from circadiand.reload import ConfigStore
 
     one = make_host("alpha", [FakeMethod("wol", "alpha", up=True)], {ACTION_UP: "wol"})
-    store = ConfigStore(tmp_path / "config.yaml", Config(hosts={"alpha": one}, defaults={}))
+    store = ConfigStore(tmp_path / "config.yaml", Config(hosts={"alpha": one}, power={}))
     client = TestClient(create_api(store))
 
     assert set(client.get("/list").json()) == {"alpha"}
@@ -179,7 +179,7 @@ def test_api_reflects_configstore_swap(tmp_path):
     # Swap the live config the way reload() does internally.
     two_a = make_host("alpha", [FakeMethod("wol", "alpha", up=True)], {ACTION_UP: "wol"})
     two_b = make_host("beta", [FakeMethod("wol", "beta", up=True)], {ACTION_UP: "wol"})
-    store._config = Config(hosts={"alpha": two_a, "beta": two_b}, defaults={})
+    store._config = Config(hosts={"alpha": two_a, "beta": two_b}, power={})
 
     assert set(client.get("/list").json()) == {"alpha", "beta"}
 

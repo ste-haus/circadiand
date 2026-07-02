@@ -38,7 +38,7 @@ def _config(alive=True, raises=None, interval=PARKED_INTERVAL) -> Config:
     method = FakeMethod("ping", "nas", check=True, alive=alive, raises=raises)
     host = make_host("nas", [method])
     host.health = Health(type="ping", interval=interval)
-    return Config(hosts={"nas": host}, defaults={})
+    return Config(hosts={"nas": host}, power={})
 
 
 # --- probe logic (called directly, no threads) -------------------------------
@@ -92,7 +92,7 @@ def test_reconcile_stops_worker_and_drops_status_when_health_removed():
         assert "nas" in monitor._workers
         # Swap in a config where nas has no health configured.
         host = make_host("nas", [FakeMethod("ping", "nas", check=True)])
-        store._config = Config(hosts={"nas": host}, defaults={})
+        store._config = Config(hosts={"nas": host}, power={})
         monitor.reconcile()
         assert "nas" not in monitor._workers
         assert monitor.get("nas") is None
@@ -119,7 +119,7 @@ def test_reconcile_skips_inapplicable_global_health():
     # Global health names ping, but this host has no ping method -> skip, no worker.
     host = make_host("vm", [FakeMethod("wol", "vm", up=True)])
     config = Config(
-        hosts={"vm": host}, defaults={}, health=Health(type="ping", interval=PARKED_INTERVAL)
+        hosts={"vm": host}, power={}, health=Health(type="ping", interval=PARKED_INTERVAL)
     )
     monitor = HealthMonitor(config)
     monitor.start()
@@ -167,7 +167,7 @@ def test_history_dropped_when_health_removed():
     try:
         _wait_for_status(monitor, "nas")
         host = make_host("nas", [FakeMethod("ping", "nas", check=True)])
-        store._config = Config(hosts={"nas": host}, defaults={})
+        store._config = Config(hosts={"nas": host}, power={})
         monitor.reconcile()
         assert "nas" not in monitor._history
     finally:
