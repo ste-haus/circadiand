@@ -271,14 +271,13 @@ defaults:
   method:
     up: wol
     down: ssh
-  health:
-    type: ping
+health:
+  type: ping
 hosts:
   nas:
-    default:
-      health:
-        type: ping
-        interval: 5
+    health:
+      type: ping
+      interval: 5
     methods:
       - type: wol
         mac: "aa:bb:cc:dd:ee:ff"
@@ -336,9 +335,8 @@ def test_resolve_health_none_when_unconfigured(tmp_path):
 
 def test_health_global_unknown_type_fails(tmp_path):
     text = """
-defaults:
-  health:
-    type: telepathy
+health:
+  type: telepathy
 hosts:
   box:
     methods:
@@ -351,9 +349,8 @@ hosts:
 
 def test_health_global_non_check_type_fails(tmp_path):
     text = """
-defaults:
-  health:
-    type: wol
+health:
+  type: wol
 hosts:
   box:
     methods:
@@ -368,9 +365,8 @@ def test_health_host_type_not_on_host_fails(tmp_path):
     text = """
 hosts:
   box:
-    default:
-      health:
-        type: ping
+    health:
+      type: ping
     methods:
       - type: wol
         mac: "aa:aa:aa:aa:aa:aa"
@@ -383,9 +379,8 @@ def test_health_host_non_check_type_fails(tmp_path):
     text = """
 hosts:
   box:
-    default:
-      health:
-        type: wol
+    health:
+      type: wol
     methods:
       - type: wol
         mac: "aa:aa:aa:aa:aa:aa"
@@ -398,10 +393,9 @@ def test_health_bad_interval_fails(tmp_path):
     text = """
 hosts:
   box:
-    default:
-      health:
-        type: ping
-        interval: 0
+    health:
+      type: ping
+      interval: 0
     methods:
       - type: ping
         host: "10.0.0.5"
@@ -414,9 +408,8 @@ def test_health_missing_type_fails(tmp_path):
     text = """
 hosts:
   box:
-    default:
-      health:
-        interval: 5
+    health:
+      interval: 5
     methods:
       - type: ping
         host: "10.0.0.5"

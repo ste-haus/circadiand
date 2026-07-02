@@ -9,27 +9,30 @@
 #   public_key: /config/circadiand.pub
 
 # Global method defaults apply to any host that doesn't override them, so you
-# don't repeat e.g. "down: ssh" on every host. A global health default works the
-# same way: any host that defines the named method (and doesn't override health)
-# is monitored with it.
+# don't repeat e.g. "down: ssh" on every host.
 defaults:
   method:
     up: wol
     down: ssh
-  health:
-    type: ping
-    interval: 10                     # optional, seconds between probes (default 10)
+
+# Top-level health default: any host that defines the named method (and doesn't
+# set its own health) is monitored with it. health is not a method-selection
+# default, so it lives here rather than under `defaults`.
+health:
+  type: ping
+  interval: 10                       # optional, seconds between probes (default 10)
 
 hosts:
   nas:
-    # Per-host override of the global defaults.
+    # Per-host override of the global method defaults.
     default:
       method:
         up: ipmi
         down: ssh
-      health:
-        type: ping
-        interval: 5                  # probe the nas more often than the default
+    # health is a sibling of methods, not a method default.
+    health:
+      type: ping
+      interval: 5                    # probe the nas more often than the default
     methods:
       - type: wol
         mac: "aa:bb:cc:dd:ee:ff"
