@@ -15,9 +15,8 @@ defaults:
     up: wol
     down: ssh
 
-# Top-level health default: any host that defines the named method (and doesn't
-# set its own health) is monitored with it. health is not a method-selection
-# default, so it lives here rather than under `defaults`.
+# Monitor every host that defines the named method (unless the host sets its
+# own health below).
 health:
   type: ping
   interval: 10                       # optional, seconds between probes (default 10)
@@ -29,7 +28,7 @@ hosts:
       method:
         up: ipmi
         down: ssh
-    # health is a sibling of methods, not a method default.
+    # Monitor nas specifically; takes precedence over the top-level health.
     health:
       type: ping
       interval: 5                    # probe the nas more often than the default
