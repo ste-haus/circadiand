@@ -1,5 +1,6 @@
 """Wake-on-LAN power-on method."""
 
+import time
 from typing import Any
 
 import wakeonlan
@@ -8,6 +9,7 @@ from .base import Method, register, require_key
 
 DEFAULT_WOL_PORT = 9
 DEFAULT_WOL_COUNT = 10
+WOL_PACKET_INTERVAL_SECONDS = 0.1
 
 
 @register
@@ -38,6 +40,8 @@ class WolMethod(Method):
         kwargs: dict[str, Any] = {"port": self.port}
         if self.broadcast:
             kwargs["ip_address"] = self.broadcast
-        for _ in range(self.count):
+        for index in range(self.count):
+            if index > 0:
+                time.sleep(WOL_PACKET_INTERVAL_SECONDS)
             wakeonlan.send_magic_packet(self.mac, **kwargs)
         return f"sent {self.count} Wake-on-LAN magic packet(s) to {self.mac}"
