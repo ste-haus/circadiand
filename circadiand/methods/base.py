@@ -17,6 +17,11 @@ ACTION_UP = "up"
 ACTION_DOWN = "down"
 ACTIONS = (ACTION_UP, ACTION_DOWN)
 
+# Liveliness probing is a capability separate from the power ACTIONS: it must
+# never be reachable through the power API (POST /{host}/{action}), so it is
+# deliberately kept out of the ACTIONS tuple.
+ACTION_CHECK = "check"
+
 # Populated by @register at import time: method type string -> Method subclass.
 METHOD_REGISTRY: dict[str, type["Method"]] = {}
 
@@ -49,12 +54,17 @@ class Method(ABC):
     TYPE: str = ""
     SUPPORTS_UP: bool = False
     SUPPORTS_DOWN: bool = False
+    SUPPORTS_CHECK: bool = False
 
     def __init__(self, hostname: str, **config: Any):
         self.hostname = hostname
 
     def supports(self, action: str) -> bool:
-        return {ACTION_UP: self.SUPPORTS_UP, ACTION_DOWN: self.SUPPORTS_DOWN}[action]
+        return {
+            ACTION_UP: self.SUPPORTS_UP,
+            ACTION_DOWN: self.SUPPORTS_DOWN,
+            ACTION_CHECK: self.SUPPORTS_CHECK,
+        }[action]
 
     def run(self, action: str) -> str:
         """Dispatch to power_up/power_down by action name."""
@@ -65,3 +75,12 @@ class Method(ABC):
 
     def power_down(self) -> str:
         raise UnsupportedAction(self.TYPE, ACTION_DOWN)
+
+    def check(self) -> bool:
+        """Probe the host's liveliness. True if reachable, False if not.
+
+        Raise :class:`ExecutionError` when the probe itself can't run (e.g. a
+        name-resolution or permission failure) — that is distinct from a probe
+        that ran and found the host down.
+        """
+        raise UnsupportedAction(self.TYPE, ACTION_CHECK)

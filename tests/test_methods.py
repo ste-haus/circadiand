@@ -7,12 +7,13 @@ import pytest
 from circadiand.errors import ConfigError, ExecutionError, UnsupportedAction
 from circadiand.methods import METHOD_REGISTRY
 from circadiand.methods.ipmi import IpmiMethod
+from circadiand.methods.ping import PingMethod
 from circadiand.methods.ssh import ENV_SSH_KEY, SshMethod
 from circadiand.methods.wol import WolMethod
 
 
 def test_registry_populated():
-    assert set(METHOD_REGISTRY) == {"wol", "ipmi", "ssh"}
+    assert set(METHOD_REGISTRY) == {"wol", "ipmi", "ssh", "ping"}
     assert METHOD_REGISTRY["wol"] is WolMethod
 
 
@@ -20,12 +21,20 @@ def test_support_flags():
     assert WolMethod.SUPPORTS_UP and not WolMethod.SUPPORTS_DOWN
     assert IpmiMethod.SUPPORTS_UP and not IpmiMethod.SUPPORTS_DOWN
     assert SshMethod.SUPPORTS_DOWN and not SshMethod.SUPPORTS_UP
+    assert PingMethod.SUPPORTS_CHECK
+    assert not PingMethod.SUPPORTS_UP and not PingMethod.SUPPORTS_DOWN
 
 
 def test_unsupported_action_raises():
     wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff")
     with pytest.raises(UnsupportedAction):
         wol.power_down()
+
+
+def test_base_check_unsupported_by_default():
+    wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff")
+    with pytest.raises(UnsupportedAction):
+        wol.check()
 
 
 # --- WOL ---------------------------------------------------------------------
@@ -47,9 +56,78 @@ def test_wol_sends_magic_packet(monkeypatch):
     assert "aa:bb:cc:dd:ee:ff" in result
 
 
+def test_wol_default_count(monkeypatch):
+    sends = []
+    monkeypatch.setattr(
+        "circadiand.methods.wol.wakeonlan.send_magic_packet",
+        lambda mac, **kwargs: sends.append(mac),
+    )
+
+    wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff")
+    wol.power_up()
+
+    assert len(sends) == 10
+
+
+def test_wol_count_override(monkeypatch):
+    sends = []
+    monkeypatch.setattr(
+        "circadiand.methods.wol.wakeonlan.send_magic_packet",
+        lambda mac, **kwargs: sends.append(mac),
+    )
+
+    wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff", count=3)
+    result = wol.power_up()
+
+    assert len(sends) == 3
+    assert "3" in result
+
+
 def test_wol_requires_mac():
     with pytest.raises(ConfigError, match="mac"):
         WolMethod("box")
+
+
+# --- Ping --------------------------------------------------------------------
+
+def test_ping_requires_host():
+    with pytest.raises(ConfigError, match="host"):
+        PingMethod("box")
+
+
+def test_ping_alive(monkeypatch):
+    calls = {}
+
+    def fake_ping(address, **kwargs):
+        calls["address"] = address
+        calls["kwargs"] = kwargs
+        return types.SimpleNamespace(is_alive=True)
+
+    monkeypatch.setattr("circadiand.methods.ping.icmplib.ping", fake_ping)
+
+    ping = PingMethod("box", host="10.0.0.9", count=2, timeout=1)
+    assert ping.check() is True
+    assert calls["address"] == "10.0.0.9"
+    assert calls["kwargs"] == {"count": 2, "timeout": 1.0, "privileged": True}
+
+
+def test_ping_dead(monkeypatch):
+    monkeypatch.setattr(
+        "circadiand.methods.ping.icmplib.ping",
+        lambda address, **kwargs: types.SimpleNamespace(is_alive=False),
+    )
+    ping = PingMethod("box", host="10.0.0.9")
+    assert ping.check() is False
+
+
+def test_ping_probe_error_wrapped(monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("circadiand.methods.ping.icmplib.ping", boom)
+    ping = PingMethod("box", host="10.0.0.9")
+    with pytest.raises(ExecutionError, match="permission denied"):
+        ping.check()
 
 
 # --- IPMI --------------------------------------------------------------------

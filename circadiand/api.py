@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Optional, Union
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -11,7 +11,8 @@ from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .config import Config
-from .errors import RequestError, UnsupportedAction
+from .errors import HealthNotMonitored, HostNotFound, RequestError, UnsupportedAction
+from .health import HEALTH_ALIVE, HealthMonitor
 from .methods import ACTION_DOWN, ACTION_UP, ACTIONS
 from .reload import ConfigStore
 
@@ -30,6 +31,7 @@ class Action(str, Enum):
 TAG_HOSTS = "hosts"
 TAG_POWER = "power"
 TAG_IDENTITY = "identity"
+TAG_HEALTH = "health"
 
 STATUS_OK = "ok"
 
@@ -55,6 +57,31 @@ class ActionResult(BaseModel):
     detail: str
 
 
+class HealthSampleInfo(BaseModel):
+    state: str = Field(..., description="Liveliness state at this probe.")
+    checked_at: str = Field(..., description="UTC ISO-8601 timestamp of the probe.")
+    detail: Optional[str] = Field(
+        None, description="Down or error message when not alive."
+    )
+
+
+class HostHealth(BaseModel):
+    hostname: str
+    state: str = Field(..., description="Liveliness state: alive, dead, or unknown.")
+    method: str = Field(..., description="Method type used to probe the host.")
+    interval: int = Field(..., description="Probe interval in seconds.")
+    checked_at: Optional[str] = Field(
+        None, description="UTC ISO-8601 timestamp of the last probe, if any."
+    )
+    detail: Optional[str] = Field(
+        None, description="Down or error message when the host is not alive."
+    )
+    samples: list[HealthSampleInfo] = Field(
+        default_factory=list,
+        description="Recent probes, oldest first — up to the last hour or 100 samples.",
+    )
+
+
 def _resolved_defaults(config: Config, hostname: str) -> dict[str, str]:
     host = config.hosts[hostname]
     resolved: dict[str, str] = {}
@@ -69,6 +96,7 @@ def create_api(
     config: Union[Config, ConfigStore],
     api_token: Optional[str] = None,
     public_key: Optional[str] = None,
+    health_monitor: Optional[HealthMonitor] = None,
 ) -> FastAPI:
     app = FastAPI(title=APP_TITLE, version=__version__, description=APP_DESCRIPTION)
     bearer_scheme = HTTPBearer(auto_error=False)
@@ -170,6 +198,51 @@ def create_api(
         detail = await run_in_threadpool(resolved.run, action.value)
         return ActionResult(
             hostname=hostname, method=resolved.TYPE, action=action.value, detail=detail
+        )
+
+    # Declared last so the literal GET routes (/list, /public-key) and FastAPI's
+    # own /docs, /openapi.json win the match for a bare depth-1 GET path.
+    @app.get(
+        "/{hostname}",
+        response_model=HostHealth,
+        tags=[TAG_HEALTH],
+        summary="Get a host's latest liveliness status",
+        responses={
+            status.HTTP_404_NOT_FOUND: {
+                "description": "Host not found or no health check configured"
+            },
+            status.HTTP_503_SERVICE_UNAVAILABLE: {
+                "description": "Host is down (dead) or its state can't be confirmed"
+            },
+        },
+    )
+    def health(hostname: str, response: Response) -> HostHealth:
+        # Intentionally unauthenticated: read-only liveliness metadata, the same
+        # class as /list.
+        active = current()
+        if hostname not in active.hosts:
+            raise HostNotFound(hostname)
+        result = health_monitor.get(hostname) if health_monitor is not None else None
+        if result is None:
+            raise HealthNotMonitored(hostname)
+        response.status_code = (
+            status.HTTP_200_OK
+            if result.state == HEALTH_ALIVE
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+        return HostHealth(
+            hostname=hostname,
+            state=result.state,
+            method=result.method,
+            interval=result.interval,
+            checked_at=result.checked_at,
+            detail=result.detail,
+            samples=[
+                HealthSampleInfo(
+                    state=s.state, checked_at=s.checked_at, detail=s.detail
+                )
+                for s in result.samples
+            ],
         )
 
     return app

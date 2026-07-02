@@ -262,3 +262,164 @@ def test_ensure_config_does_not_overwrite_existing(tmp_path):
 def test_malformed_yaml_raises_config_error(tmp_path):
     with pytest.raises(ConfigError, match="not valid YAML"):
         load_config(write(tmp_path, "hosts: [unbalanced\n"))
+
+
+# --- health ------------------------------------------------------------------
+
+HEALTH_VALID = """
+defaults:
+  method:
+    up: wol
+    down: ssh
+  health:
+    type: ping
+hosts:
+  nas:
+    default:
+      health:
+        type: ping
+        interval: 5
+    methods:
+      - type: wol
+        mac: "aa:bb:cc:dd:ee:ff"
+      - type: ping
+        host: "10.0.0.10"
+  workstation:
+    methods:
+      - type: wol
+        mac: "11:22:33:44:55:66"
+      - type: ping
+        host: "10.0.0.20"
+  vm:
+    methods:
+      - type: wol
+        mac: "22:33:44:55:66:77"
+"""
+
+
+def test_health_global_default_interval(tmp_path):
+    config = load_config(write(tmp_path, HEALTH_VALID))
+    assert config.health.type == "ping"
+    assert config.health.interval == 10  # default when unspecified
+
+
+def test_health_per_host_override(tmp_path):
+    config = load_config(write(tmp_path, HEALTH_VALID))
+    assert config.hosts["nas"].health.interval == 5
+
+
+def test_resolve_health_per_host(tmp_path):
+    config = load_config(write(tmp_path, HEALTH_VALID))
+    method, interval = config.resolve_health("nas")
+    assert method.TYPE == "ping"
+    assert interval == 5
+
+
+def test_resolve_health_global(tmp_path):
+    config = load_config(write(tmp_path, HEALTH_VALID))
+    method, interval = config.resolve_health("workstation")  # inherits global ping
+    assert method.TYPE == "ping"
+    assert interval == 10
+
+
+def test_resolve_health_global_inapplicable_returns_none(tmp_path):
+    # vm has no ping method, so the global health default doesn't apply.
+    config = load_config(write(tmp_path, HEALTH_VALID))
+    assert config.resolve_health("vm") is None
+
+
+def test_resolve_health_none_when_unconfigured(tmp_path):
+    config = load_config(write(tmp_path, VALID))  # no health anywhere
+    assert config.health is None
+    assert config.resolve_health("nas") is None
+
+
+def test_health_global_unknown_type_fails(tmp_path):
+    text = """
+defaults:
+  health:
+    type: telepathy
+hosts:
+  box:
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    with pytest.raises(ConfigError, match="unknown method type"):
+        load_config(write(tmp_path, text))
+
+
+def test_health_global_non_check_type_fails(tmp_path):
+    text = """
+defaults:
+  health:
+    type: wol
+hosts:
+  box:
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    with pytest.raises(ConfigError, match="does not support"):
+        load_config(write(tmp_path, text))
+
+
+def test_health_host_type_not_on_host_fails(tmp_path):
+    text = """
+hosts:
+  box:
+    default:
+      health:
+        type: ping
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    with pytest.raises(ConfigError, match="not defined on the host"):
+        load_config(write(tmp_path, text))
+
+
+def test_health_host_non_check_type_fails(tmp_path):
+    text = """
+hosts:
+  box:
+    default:
+      health:
+        type: wol
+    methods:
+      - type: wol
+        mac: "aa:aa:aa:aa:aa:aa"
+"""
+    with pytest.raises(ConfigError, match="does not support"):
+        load_config(write(tmp_path, text))
+
+
+def test_health_bad_interval_fails(tmp_path):
+    text = """
+hosts:
+  box:
+    default:
+      health:
+        type: ping
+        interval: 0
+    methods:
+      - type: ping
+        host: "10.0.0.5"
+"""
+    with pytest.raises(ConfigError, match="positive integer"):
+        load_config(write(tmp_path, text))
+
+
+def test_health_missing_type_fails(tmp_path):
+    text = """
+hosts:
+  box:
+    default:
+      health:
+        interval: 5
+    methods:
+      - type: ping
+        host: "10.0.0.5"
+"""
+    with pytest.raises(ConfigError, match="missing a string 'type'"):
+        load_config(write(tmp_path, text))

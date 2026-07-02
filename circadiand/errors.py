@@ -42,6 +42,14 @@ class MethodNotFound(RequestError):
         super().__init__(f"host '{hostname}' has no method '{method}'")
 
 
+class HealthNotMonitored(RequestError):
+    status_code = HTTPStatus.NOT_FOUND
+
+    def __init__(self, hostname: str):
+        self.hostname = hostname
+        super().__init__(f"host '{hostname}' has no health check configured")
+
+
 class NoDefaultMethod(RequestError):
     status_code = HTTPStatus.BAD_REQUEST
 

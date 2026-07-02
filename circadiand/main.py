@@ -13,6 +13,7 @@ import uvicorn
 from . import __version__
 from .api import create_api
 from .config import ensure_config, load_config
+from .health import HealthMonitor
 from .keys import load_identity
 from .methods.ssh import ENV_SSH_KEY
 from .reload import DEFAULT_RELOAD_INTERVAL_SECONDS, ConfigStore, start_config_watcher
@@ -89,7 +90,17 @@ def main() -> None:
     else:
         _LOGGER.info("config live-reload disabled (%s=0)", ENV_RELOAD_INTERVAL)
 
-    app = create_api(store, api_token=api_token, public_key=public_key)
+    # Background liveliness monitoring: one worker per host with a health config,
+    # reconciled on reload. Starts probing immediately.
+    health_monitor = HealthMonitor(store)
+    health_monitor.start()
+
+    app = create_api(
+        store,
+        api_token=api_token,
+        public_key=public_key,
+        health_monitor=health_monitor,
+    )
     uvicorn.run(app, host=args.host, port=args.port)
 
 
