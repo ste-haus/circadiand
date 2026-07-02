@@ -2,8 +2,11 @@ services:
   circadiand:
     image: ghcr.io/ste-haus/circadiand:latest
     build: .
-    ports:
-      - "8000:8000"
+    # Host networking is required for Wake-on-LAN: magic packets are broadcast
+    # to the LAN, which Docker's bridge NAT will not forward. With host mode the
+    # service listens directly on CIRCADIAND_PORT (default 8000); port publishing
+    # does not apply.
+    network_mode: host
     environment:
       CIRCADIAND_CONFIG: /config/config.yaml
       # CIRCADIAND_API_TOKEN: change-me   # set to require bearer auth
