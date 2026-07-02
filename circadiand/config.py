@@ -6,12 +6,18 @@ Shape::
       method:
         up: wol
         down: ssh
+    health:                 # top-level global health default (optional)
+      type: ping
+      interval: 10
     hosts:
       nas:
         default:
           method:
             up: ipmi
             down: ssh
+        health:             # per-host override, a sibling of methods (optional)
+          type: ping
+          interval: 5
         methods:
           - type: wol
             mac: "aa:bb:cc:dd:ee:ff"
@@ -19,6 +25,8 @@ Shape::
             host: "192.168.1.50"
             username: ADMIN
             password: secret
+          - type: ping
+            host: "192.168.1.50"
 
 Parsing is strict and fails fast: unknown method types, duplicate types on a
 host, a per-host default naming a method the host doesn't define, or a malformed
@@ -149,18 +157,13 @@ def _parse_method_defaults(block: Any, where: str) -> dict[str, str]:
     return result
 
 
-def _parse_health(block: Any, where: str) -> Optional[Health]:
-    """Parse the ``health`` sub-block of a ``default``/``defaults`` block.
+def _parse_health(health_block: Any, where: str) -> Optional[Health]:
+    """Parse a ``health`` block (a sibling of ``methods`` per host, or top-level).
 
     Validates shape only (a non-empty ``type`` string and a positive integer
     ``interval``, defaulting to 10). Whether the ``type`` is a usable method is
     validated by the caller, which has the relevant method scope.
     """
-    if block is None:
-        return None
-    if not isinstance(block, dict):
-        raise ConfigError(f"{where} block must be a mapping")
-    health_block = block.get(KEY_HEALTH)
     if health_block is None:
         return None
     if not isinstance(health_block, dict):
@@ -221,8 +224,7 @@ def _parse_host(name: str, block: Any) -> Host:
         params = {k: v for k, v in entry.items() if k != KEY_TYPE}
         methods[method_type] = method_cls(hostname=name, **params)
 
-    default_block = block.get(KEY_DEFAULT)
-    defaults = _parse_method_defaults(default_block, f"host '{name}'")
+    defaults = _parse_method_defaults(block.get(KEY_DEFAULT), f"host '{name}'")
     for action, method_type in defaults.items():
         if method_type not in methods:
             raise ConfigError(
@@ -230,7 +232,8 @@ def _parse_host(name: str, block: Any) -> Host:
                 f"but that method is not defined on the host"
             )
 
-    health = _parse_health(default_block, f"host '{name}'")
+    # health is a sibling of methods, not a method-selection default.
+    health = _parse_health(block.get(KEY_HEALTH), f"host '{name}'")
     if health is not None:
         method = methods.get(health.type)
         if method is None:
@@ -288,18 +291,19 @@ def load_config(path: str | Path) -> Config:
                 f"'{method_type}' (known types: {known})"
             )
 
-    global_health = _parse_health(defaults_block, KEY_DEFAULTS)
+    # health is top-level (sibling of defaults/hosts), not a method default.
+    global_health = _parse_health(raw.get(KEY_HEALTH), KEY_HEALTH)
     if global_health is not None:
         method_cls = METHOD_REGISTRY.get(global_health.type)
         if method_cls is None:
             known = ", ".join(sorted(METHOD_REGISTRY)) or "none"
             raise ConfigError(
-                f"{KEY_DEFAULTS} health is unknown method type "
+                f"top-level {KEY_HEALTH} is unknown method type "
                 f"'{global_health.type}' (known types: {known})"
             )
         if not method_cls.SUPPORTS_CHECK:
             raise ConfigError(
-                f"{KEY_DEFAULTS} health type '{global_health.type}' "
+                f"top-level {KEY_HEALTH} type '{global_health.type}' "
                 f"does not support liveliness checks"
             )
 
