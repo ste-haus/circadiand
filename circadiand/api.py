@@ -43,9 +43,9 @@ class MethodInfo(BaseModel):
 
 class HostInfo(BaseModel):
     methods: list[MethodInfo]
-    defaults: dict[str, str] = Field(
+    power: dict[str, str] = Field(
         default_factory=dict,
-        description="Resolved default method type per action (host or global).",
+        description="Resolved power method type per action (host or global).",
     )
 
 
@@ -82,11 +82,11 @@ class HostHealth(BaseModel):
     )
 
 
-def _resolved_defaults(config: Config, hostname: str) -> dict[str, str]:
+def _resolved_power(config: Config, hostname: str) -> dict[str, str]:
     host = config.hosts[hostname]
     resolved: dict[str, str] = {}
     for action in ACTIONS:
-        method_type = host.defaults.get(action) or config.defaults.get(action)
+        method_type = host.power.get(action) or config.power.get(action)
         if method_type and method_type in host.methods:
             resolved[action] = method_type
     return resolved
@@ -98,7 +98,15 @@ def create_api(
     public_key: Optional[str] = None,
     health_monitor: Optional[HealthMonitor] = None,
 ) -> FastAPI:
-    app = FastAPI(title=APP_TITLE, version=__version__, description=APP_DESCRIPTION)
+    # Sort operations and tags alphabetically in the Swagger UI so the endpoint
+    # list is stable and easy to scan (routes are declared in match-priority
+    # order, which isn't alphabetical).
+    app = FastAPI(
+        title=APP_TITLE,
+        version=__version__,
+        description=APP_DESCRIPTION,
+        swagger_ui_parameters={"operationsSorter": "alpha", "tagsSorter": "alpha"},
+    )
     bearer_scheme = HTTPBearer(auto_error=False)
 
     # Accept a live ConfigStore (reloadable) or a fixed Config. Handlers always
@@ -147,7 +155,7 @@ def create_api(
                 for method in host.methods.values()
             ]
             result[name] = HostInfo(
-                methods=methods, defaults=_resolved_defaults(active, name)
+                methods=methods, power=_resolved_power(active, name)
             )
         return result
 

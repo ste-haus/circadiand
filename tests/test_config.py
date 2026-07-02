@@ -20,15 +20,15 @@ def write(tmp_path, text: str):
 
 VALID = """
 defaults:
-  method:
+  power:
     up: wol
     down: ssh
 hosts:
   nas:
-    default:
-      method:
-        up: ipmi
-        down: ssh
+    host: "10.0.0.10"
+    power:
+      up: ipmi
+      down: ssh
     methods:
       - type: wol
         mac: "aa:bb:cc:dd:ee:ff"
@@ -37,14 +37,13 @@ hosts:
         username: admin
         password: secret
       - type: ssh
-        host: "10.0.0.10"
         key_path: /keys/id
   workstation:
+    host: "10.0.0.20"
     methods:
       - type: wol
         mac: "11:22:33:44:55:66"
       - type: ssh
-        host: "10.0.0.20"
         key_path: /keys/id
 """
 
@@ -53,8 +52,33 @@ def test_loads_hosts_and_methods(tmp_path):
     config = load_config(write(tmp_path, VALID))
     assert set(config.hosts) == {"nas", "workstation"}
     assert set(config.hosts["nas"].methods) == {"wol", "ipmi", "ssh"}
-    assert config.defaults == {ACTION_UP: "wol", ACTION_DOWN: "ssh"}
-    assert config.hosts["nas"].defaults == {ACTION_UP: "ipmi", ACTION_DOWN: "ssh"}
+    assert config.power == {ACTION_UP: "wol", ACTION_DOWN: "ssh"}
+    assert config.hosts["nas"].power == {ACTION_UP: "ipmi", ACTION_DOWN: "ssh"}
+
+
+def test_shared_host_inherited_by_ssh(tmp_path):
+    config = load_config(write(tmp_path, VALID))
+    # ssh has no host of its own -> inherits the host-level address.
+    assert config.hosts["nas"].methods["ssh"].host == "10.0.0.10"
+    assert config.hosts["workstation"].methods["ssh"].host == "10.0.0.20"
+
+
+def test_ipmi_keeps_its_own_host(tmp_path):
+    config = load_config(write(tmp_path, VALID))
+    # ipmi targets the BMC, not the shared host address.
+    assert config.hosts["nas"].methods["ipmi"].host == "10.0.0.5"
+
+
+def test_shared_host_missing_fails(tmp_path):
+    text = """
+hosts:
+  box:
+    methods:
+      - type: ssh
+        key_path: /keys/id
+"""
+    with pytest.raises(ConfigError, match="needs a 'host'"):
+        load_config(write(tmp_path, text))
 
 
 def test_resolution_explicit(tmp_path):
@@ -125,13 +149,12 @@ hosts:
         load_config(write(tmp_path, text))
 
 
-def test_host_default_references_missing_method_fails(tmp_path):
+def test_host_power_references_missing_method_fails(tmp_path):
     text = """
 hosts:
   box:
-    default:
-      method:
-        up: ipmi
+    power:
+      up: ipmi
     methods:
       - type: wol
         mac: "aa:aa:aa:aa:aa:aa"
@@ -151,10 +174,10 @@ hosts:
         load_config(write(tmp_path, text))
 
 
-def test_unknown_default_action_fails(tmp_path):
+def test_unknown_power_action_fails(tmp_path):
     text = """
 defaults:
-  method:
+  power:
     sideways: wol
 hosts:
   box:
@@ -162,14 +185,14 @@ hosts:
       - type: wol
         mac: "aa:aa:aa:aa:aa:aa"
 """
-    with pytest.raises(ConfigError, match="unknown default action"):
+    with pytest.raises(ConfigError, match="unknown action"):
         load_config(write(tmp_path, text))
 
 
-def test_global_default_unknown_type_fails(tmp_path):
+def test_global_power_unknown_type_fails(tmp_path):
     text = """
 defaults:
-  method:
+  power:
     up: telepathy
 hosts:
   box:
@@ -268,13 +291,13 @@ def test_malformed_yaml_raises_config_error(tmp_path):
 
 HEALTH_VALID = """
 defaults:
-  method:
+  power:
     up: wol
     down: ssh
-health:
-  type: ping
+health: ping
 hosts:
   nas:
+    host: "10.0.0.10"
     health:
       type: ping
       interval: 5
@@ -282,18 +305,24 @@ hosts:
       - type: wol
         mac: "aa:bb:cc:dd:ee:ff"
       - type: ping
-        host: "10.0.0.10"
   workstation:
+    host: "10.0.0.20"
     methods:
       - type: wol
         mac: "11:22:33:44:55:66"
       - type: ping
-        host: "10.0.0.20"
   vm:
     methods:
       - type: wol
         mac: "22:33:44:55:66:77"
 """
+
+
+def test_health_string_shorthand(tmp_path):
+    # `health: ping` is shorthand for {type: ping, interval: 10}.
+    config = load_config(write(tmp_path, HEALTH_VALID))
+    assert config.health.type == "ping"
+    assert config.health.interval == 10
 
 
 def test_health_global_default_interval(tmp_path):

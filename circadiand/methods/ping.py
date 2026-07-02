@@ -25,7 +25,8 @@ class PingMethod(Method):
     """Probe a host's liveliness with ICMP echo requests via ``icmplib``.
 
     Config:
-        host:       target address (required)
+        host:       target address. Normally inherited from the host-level
+                    ``host`` field; only set here to override it.
         count:      echo requests to send (optional, default 1)
         timeout:    seconds to wait per request (optional, default 2)
         privileged: use raw sockets (optional, default True)
@@ -33,6 +34,7 @@ class PingMethod(Method):
 
     TYPE = "ping"
     SUPPORTS_CHECK = True
+    USES_SHARED_HOST = True
 
     def __init__(self, hostname: str, **config: Any):
         super().__init__(hostname, **config)

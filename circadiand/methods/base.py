@@ -56,6 +56,12 @@ class Method(ABC):
     SUPPORTS_DOWN: bool = False
     SUPPORTS_CHECK: bool = False
 
+    # True if this method targets the host's primary address and should inherit
+    # the host-level ``host`` field when its config omits one. Methods that talk
+    # to a different endpoint (e.g. ipmi -> the BMC) leave this False and carry
+    # their own ``host``.
+    USES_SHARED_HOST: bool = False
+
     def __init__(self, hostname: str, **config: Any):
         self.hostname = hostname
 

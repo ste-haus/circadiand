@@ -25,6 +25,12 @@ def test_support_flags():
     assert not PingMethod.SUPPORTS_UP and not PingMethod.SUPPORTS_DOWN
 
 
+def test_shared_host_flags():
+    # ssh/ping target the machine's primary address; ipmi/wol carry their own.
+    assert SshMethod.USES_SHARED_HOST and PingMethod.USES_SHARED_HOST
+    assert not IpmiMethod.USES_SHARED_HOST and not WolMethod.USES_SHARED_HOST
+
+
 def test_unsupported_action_raises():
     wol = WolMethod("box", mac="aa:bb:cc:dd:ee:ff")
     with pytest.raises(UnsupportedAction):

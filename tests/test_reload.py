@@ -7,7 +7,7 @@ from circadiand.reload import ConfigStore, start_config_watcher
 
 ONE_HOST = """
 defaults:
-  method:
+  power:
     up: wol
 hosts:
   alpha:
@@ -18,7 +18,7 @@ hosts:
 
 TWO_HOSTS = """
 defaults:
-  method:
+  power:
     up: wol
 hosts:
   alpha:

@@ -6,29 +6,31 @@ A small REST service for powering hosts **on** (Wake-on-LAN, IPMI) and **off** (
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/list` | List configured hosts, their methods/actions, and resolved defaults. |
+| GET | `/list` | List configured hosts, their methods/actions, and resolved power methods. |
 | GET | `/public-key` | Return the circadiand SSH public key as plaintext. |
 | GET | `/{host}` | Return the host's latest liveliness status (see [Health checks](#health-checks)). |
 | POST | `/{host}/{action}?method={method}` | Power a host `up` or `down`. |
 
-`action` is `up` or `down`. The `method` query param is optional; when omitted it resolves in order: explicit `?method=` → host `default.method.{up,down}` → global `defaults.method.{up,down}`. If nothing resolves the request is a 400. Examples:
+`action` is `up` or `down`. The `method` query param is optional; when omitted it resolves in order: explicit `?method=` → host `power.{up,down}` → global `defaults.power.{up,down}`. If nothing resolves the request is a 400. Examples:
 
 ```bash
-curl -X POST localhost:8000/nas/up                 # uses nas's default up method
+curl -X POST localhost:8000/nas/up                 # uses nas's power.up method
 curl -X POST localhost:8000/nas/up?method=wol      # force a specific method
 curl -X POST localhost:8000/workstation/down
 ```
 
-Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw schema is at `/openapi.json`.
+Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw schema is at `/openapi.json`. Swagger operations and tags are sorted alphabetically (`swagger_ui_parameters` in `create_api`) — keep new routes findable by leaning on that rather than declaration order.
 
 ## Methods
 
-| Type | Action | Driver | Required config |
-|------|--------|--------|-----------------|
-| `wol` | up | [`wakeonlan`](https://pypi.org/project/wakeonlan/) | `mac` (`broadcast`, `port` optional) |
-| `ipmi` | up | [`pyghmi`](https://pypi.org/project/pyghmi/) | `host`, `username`, `password` |
-| `ssh` | down | [`paramiko`](https://pypi.org/project/paramiko/) | `host` (`username`, `port`, `key_path`, `shutdown_command` optional) |
-| `ping` | check | [`icmplib`](https://pypi.org/project/icmplib/) | `host` (`count`, `timeout`, `privileged` optional) |
+Most methods talk to the machine's primary address, so it's set once as the host-level `host` (see [Configuration](#configuration)) and inherited; a method only needs its own `host` to point somewhere else. `ipmi` is exactly that case: it targets the BMC, which has its own management NIC and IP separate from the OS, so it carries its own `host`.
+
+| Type | Action | Driver | Config |
+|------|--------|--------|--------|
+| `wol` | up | [`wakeonlan`](https://pypi.org/project/wakeonlan/) | `mac` (`broadcast`, `port`, `count` optional) |
+| `ipmi` | up | [`pyghmi`](https://pypi.org/project/pyghmi/) | `host` (the BMC), `username`, `password` |
+| `ssh` | down | [`paramiko`](https://pypi.org/project/paramiko/) | inherits `host` (`username`, `port`, `key_path`, `shutdown_command` optional) |
+| `ping` | check | [`icmplib`](https://pypi.org/project/icmplib/) | inherits `host` (`count`, `timeout`, `privileged` optional) |
 
 > IPMI power-off is implemented but disabled (`SUPPORTS_OFF = False`) until needed.
 
@@ -58,28 +60,29 @@ A YAML file injected into the container. If no file exists at `CIRCADIAND_CONFIG
 
 ```yaml
 defaults:
-  method:
+  power:                       # global fallback method per action
     up: wol
     down: ssh
 hosts:
   nas:
-    default:
-      method:
-        up: ipmi
-        down: ssh
+    host: "192.168.1.10"       # the machine's address, shared by ssh/ping/...
+    power:                     # per-host method per action (overrides defaults)
+      up: ipmi
+      down: ssh
     methods:
       - type: wol
         mac: "aa:bb:cc:dd:ee:ff"
       - type: ipmi
-        host: "192.168.1.50"
+        host: "192.168.1.50"   # the BMC — a separate IP from host above
         username: "ADMIN"
         password: "changeme"
-      - type: ssh
-        host: "192.168.1.10"
+      - type: ssh              # no host -> inherits 192.168.1.10
         username: "circadiand"
 ```
 
-Invalid config (unknown method type, duplicate type on a host, a default naming a method the host doesn't define, etc.) fails fast at startup.
+Each host declares its address once as the top-level `host`; `ssh`, `ping`, and any other address-targeting method inherit it (set a method's own `host` only to override). `ipmi` is the exception — it targets the BMC's separate management IP, so it always carries its own `host`.
+
+Invalid config (unknown method type, duplicate type on a host, a `power` entry naming a method the host doesn't define, a shared-host method with no `host` to use, etc.) fails fast at startup.
 
 ## Environment
 
@@ -95,24 +98,22 @@ Invalid config (unknown method type, duplicate type on a host, a default naming 
 
 ## Live reload
 
-The config file is watched for changes (mtime polling every `CIRCADIAND_RELOAD_INTERVAL` seconds, default 120; set to `0` to disable). On change, the host/method/defaults config is re-parsed and swapped in atomically with no restart and no dropped requests. A malformed edit is logged and the previous config is kept, so a bad file never takes the service down. The SSH identity is resolved once at startup and is **not** affected by reloads.
+The config file is watched for changes (mtime polling every `CIRCADIAND_RELOAD_INTERVAL` seconds, default 120; set to `0` to disable). On change, the host/method/power/health config is re-parsed and swapped in atomically with no restart and no dropped requests. A malformed edit is logged and the previous config is kept, so a bad file never takes the service down. The SSH identity is resolved once at startup and is **not** affected by reloads.
 
 ## Health checks
 
-A host can be monitored for liveliness by adding a `health` block. Set it on a host to monitor that host, or top-level to monitor every host that defines the named method. `type` names one of the host's configured methods that supports checking (currently `ping`); `interval` is the seconds between probes and defaults to **10**. A host's own `health` takes precedence over the top-level one.
+A host can be monitored for liveliness by adding a `health` block. Set it on a host to monitor that host, or top-level to monitor every host that defines the named method. The value is either a bare method type (`health: ping`, default interval) or a mapping with a custom `interval` in seconds (default **10**). `type` names one of the host's configured methods that supports checking (currently `ping`). A host's own `health` takes precedence over the top-level one.
 
 ```yaml
-health:                  # monitors every host that defines the named method
-  type: ping
-  interval: 10
+health: ping             # shorthand: monitor every host with a ping method, every 10s
 hosts:
   nas:
-    health:              # monitor nas specifically
+    host: "192.168.1.10"
+    health:              # mapping form for a non-default interval
       type: ping
       interval: 5        # every 5s instead of the top-level 10
     methods:
-      - type: ping
-        host: "192.168.1.10"
+      - type: ping       # inherits host: 192.168.1.10
       # ... power methods ...
 ```
 

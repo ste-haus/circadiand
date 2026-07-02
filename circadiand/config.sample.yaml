@@ -8,27 +8,26 @@
 #   private_key: /config/circadiand
 #   public_key: /config/circadiand.pub
 
-# Global method defaults apply to any host that doesn't override them, so you
-# don't repeat e.g. "down: ssh" on every host.
+# Global power defaults pick the method per action for any host that doesn't
+# set its own, so you don't repeat e.g. "down: ssh" on every host.
 defaults:
-  method:
+  power:
     up: wol
     down: ssh
 
 # Monitor every host that defines the named method (unless the host sets its
-# own health below).
-health:
-  type: ping
-  interval: 10                       # optional, seconds between probes (default 10)
+# own health below). Shorthand for {type: ping, interval: 10}.
+health: ping
 
 hosts:
   nas:
-    # Per-host override of the global method defaults.
-    default:
-      method:
-        up: ipmi
-        down: ssh
-    # Monitor nas specifically; takes precedence over the top-level health.
+    host: "192.168.1.10"             # the machine's address, shared by ssh/ping
+    # Per-host power methods, overriding the global defaults.
+    power:
+      up: ipmi
+      down: ssh
+    # Monitor nas specifically; takes precedence over the top-level health. Use
+    # the mapping form when you want a non-default interval.
     health:
       type: ping
       interval: 5                    # probe the nas more often than the default
@@ -38,24 +37,21 @@ hosts:
         broadcast: "192.168.1.255"   # optional
         count: 10                    # optional, magic packets to send (default 10)
       - type: ipmi
-        host: "192.168.1.50"
+        host: "192.168.1.50"         # the BMC, a separate IP from host above
         username: "ADMIN"
         password: "changeme"
-      - type: ssh
-        host: "192.168.1.10"
+      - type: ssh                    # inherits host: 192.168.1.10
         username: "circadiand"
         # key_path defaults to $CIRCADIAND_SSH_KEY
-      - type: ping
-        host: "192.168.1.10"         # liveliness only; can't power up/down
+      - type: ping                   # inherits host: 192.168.1.10
 
   workstation:
-    # No per-host default -> inherits defaults.method (up=wol, down=ssh) and the
+    host: "192.168.1.20"
+    # No per-host power -> inherits defaults.power (up=wol, down=ssh) and the
     # global health default (ping) because it defines a ping method below.
     methods:
       - type: wol
         mac: "11:22:33:44:55:66"
       - type: ssh
-        host: "192.168.1.20"
         username: "circadiand"
       - type: ping
-        host: "192.168.1.20"
