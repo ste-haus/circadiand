@@ -99,17 +99,17 @@ The config file is watched for changes (mtime polling every `CIRCADIAND_RELOAD_I
 
 ## Health checks
 
-A host can be monitored for liveliness by adding a `health` block. Because health isn't a method-selection default, it lives alongside `methods` rather than under `default`: a top-level `health` (applies to any host that defines the named method and doesn't set its own) or a per-host `health` sibling of `methods` (override). `type` names one of the host's configured methods that supports checking (currently `ping`); `interval` is the seconds between probes and defaults to **10**.
+A host can be monitored for liveliness by adding a `health` block. Set it on a host to monitor that host, or top-level to monitor every host that defines the named method. `type` names one of the host's configured methods that supports checking (currently `ping`); `interval` is the seconds between probes and defaults to **10**. A host's own `health` takes precedence over the top-level one.
 
 ```yaml
-health:                  # top-level default, applies to hosts with the method
+health:                  # monitors every host that defines the named method
   type: ping
   interval: 10
 hosts:
   nas:
-    health:              # per-host override, a sibling of methods
+    health:              # monitor nas specifically
       type: ping
-      interval: 5        # probe the nas every 5s instead of the default 10
+      interval: 5        # every 5s instead of the top-level 10
     methods:
       - type: ping
         host: "192.168.1.10"
