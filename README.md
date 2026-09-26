@@ -158,6 +158,21 @@ spec:
       image: ghcr.io/ste-haus/circadiand:latest
 ```
 
+## Logging
+
+Every externally initiated call to a host route logs one `key=value` line naming the host, alongside uvicorn's own access log:
+
+```
+INFO:circadiand:status host=nas state=dead method=ping interval=10 checked_at=2026-07-01T00:00:00+00:00 detail="nas is not responding to ping"
+INFO:circadiand:power host=nas action=up method=wol method_source=default status=ok detail="sent 3 Wake-on-LAN magic packet(s) to aa:bb:cc:dd:ee:ff"
+WARNING:circadiand:power host=nas action=down method=ssh method_source=query status=error detail=timeout
+WARNING:circadiand:rejected host=ghost request="POST /ghost/up" status=404 detail="unknown host 'ghost'"
+```
+
+`method_source` is `query` when the caller chose the method and `default` when it came from the host or global power default. The background health monitor never logs its probes, and requests from Kubernetes probes (`User-Agent: kube-probe/...`) are not logged either.
+
+When running behind a reverse proxy, set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's address (or CIDR) so the access log records the real client from `X-Forwarded-For` instead of the proxy.
+
 ## Running
 
 Common tasks are in the [`Makefile`](Makefile) (`make help` to list them).

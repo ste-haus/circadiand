@@ -1,5 +1,7 @@
 """FastAPI application: list/power/public-key routes with optional auth."""
 
+import json
+import logging
 from enum import Enum
 from typing import Optional, Union
 
@@ -11,7 +13,13 @@ from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .config import Config
-from .errors import HealthNotMonitored, HostNotFound, RequestError, UnsupportedAction
+from .errors import (
+    ExecutionError,
+    HealthNotMonitored,
+    HostNotFound,
+    RequestError,
+    UnsupportedAction,
+)
 from .health import HEALTH_ALIVE, HealthMonitor
 from .methods import ACTION_DOWN, ACTION_UP, ACTIONS
 from .reload import ConfigStore
@@ -34,6 +42,48 @@ TAG_IDENTITY = "identity"
 TAG_HEALTH = "health"
 
 STATUS_OK = "ok"
+STATUS_ERROR = "error"
+
+_LOGGER = logging.getLogger("circadiand")
+
+# Request log events, one per kind of externally initiated call.
+LOG_EVENT_STATUS = "status"
+LOG_EVENT_POWER = "power"
+LOG_EVENT_REJECTED = "rejected"
+
+METHOD_SOURCE_QUERY = "query"
+METHOD_SOURCE_DEFAULT = "default"
+
+# Kubelet probes identify themselves this way; they are the orchestrator, not a
+# real caller, so their requests are not logged.
+HEADER_USER_AGENT = "user-agent"
+KUBE_PROBE_USER_AGENT_PREFIX = "kube-probe/"
+
+PATH_PARAM_HOSTNAME = "hostname"
+LOG_VALUE_SPECIAL_CHARS = ('"', "=")
+
+
+def _is_kube_probe(request: Request) -> bool:
+    user_agent = request.headers.get(HEADER_USER_AGENT, "")
+    return user_agent.startswith(KUBE_PROBE_USER_AGENT_PREFIX)
+
+
+def _format_log_value(value: object) -> str:
+    text = str(value)
+    needs_quoting = not text or any(
+        char.isspace() or char in LOG_VALUE_SPECIAL_CHARS for char in text
+    )
+    return json.dumps(text) if needs_quoting else text
+
+
+def _log_request(level: int, event: str, **fields: object) -> None:
+    """Log a request as ``event key=value ...``, omitting fields that are None."""
+    pairs = " ".join(
+        f"{key}={_format_log_value(value)}"
+        for key, value in fields.items()
+        if value is not None
+    )
+    _LOGGER.log(level, "%s %s", event, pairs)
 
 
 class MethodInfo(BaseModel):
@@ -128,7 +178,18 @@ def create_api(
             )
 
     @app.exception_handler(RequestError)
-    async def _handle_request_error(_request: Request, exc: RequestError) -> JSONResponse:
+    async def _handle_request_error(request: Request, exc: RequestError) -> JSONResponse:
+        # Power failures on the target are logged by the power handler with the
+        # full action context.
+        if not isinstance(exc, ExecutionError) and not _is_kube_probe(request):
+            _log_request(
+                logging.WARNING,
+                LOG_EVENT_REJECTED,
+                host=request.path_params.get(PATH_PARAM_HOSTNAME),
+                request=f"{request.method} {request.url.path}",
+                status=int(exc.status_code),
+                detail=str(exc),
+            )
         return JSONResponse(status_code=int(exc.status_code), content={"detail": str(exc)})
 
     error_responses = {
@@ -197,6 +258,7 @@ def create_api(
         dependencies=[Depends(require_auth)],
     )
     async def power(
+        request: Request,
         hostname: str,
         action: Action,
         method: Optional[str] = Query(
@@ -208,7 +270,31 @@ def create_api(
         resolved = current().resolve(hostname, action.value, method)
         if not resolved.supports(action.value):
             raise UnsupportedAction(resolved.TYPE, action.value)
-        detail = await run_in_threadpool(resolved.run, action.value)
+
+        should_log = not _is_kube_probe(request)
+        log_fields = {
+            "host": hostname,
+            "action": action.value,
+            "method": resolved.TYPE,
+            "method_source": METHOD_SOURCE_QUERY if method else METHOD_SOURCE_DEFAULT,
+        }
+        try:
+            detail = await run_in_threadpool(resolved.run, action.value)
+        except ExecutionError as exc:
+            if should_log:
+                _log_request(
+                    logging.WARNING,
+                    LOG_EVENT_POWER,
+                    **log_fields,
+                    status=STATUS_ERROR,
+                    detail=exc.detail,
+                )
+            raise
+
+        if should_log:
+            _log_request(
+                logging.INFO, LOG_EVENT_POWER, **log_fields, status=STATUS_OK, detail=detail
+            )
         return ActionResult(
             hostname=hostname, method=resolved.TYPE, action=action.value, detail=detail
         )
@@ -229,7 +315,7 @@ def create_api(
             },
         },
     )
-    def health(hostname: str, response: Response) -> HostHealth:
+    def health(hostname: str, request: Request, response: Response) -> HostHealth:
         # Intentionally unauthenticated: read-only liveliness metadata, the same
         # class as /list.
         active = current()
@@ -243,6 +329,18 @@ def create_api(
             if result.state == HEALTH_ALIVE
             else status.HTTP_503_SERVICE_UNAVAILABLE
         )
+
+        if not _is_kube_probe(request):
+            _log_request(
+                logging.INFO,
+                LOG_EVENT_STATUS,
+                host=hostname,
+                state=result.state,
+                method=result.method,
+                interval=result.interval,
+                checked_at=result.checked_at,
+                detail=result.detail,
+            )
         return HostHealth(
             hostname=hostname,
             state=result.state,
