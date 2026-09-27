@@ -1,4 +1,6 @@
-"""Endpoint behavior, error contract, and auth."""
+"""Endpoint behavior, error contract, auth, and request logging."""
+
+import logging
 
 from fastapi.testclient import TestClient
 
@@ -263,3 +265,76 @@ def test_health_route_does_not_shadow_list(config):
     resp = _health_client(config, {}).get("/list")
     assert resp.status_code == 200
     assert set(resp.json()) == {"nas", "workstation"}
+
+
+# --- request logging ---------------------------------------------------------
+
+def _request_logs(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == "circadiand"]
+
+
+def test_power_logs_action_method_and_source(client, caplog):
+    caplog.set_level(logging.INFO, logger="circadiand")
+    client.post("/nas/up")
+    client.post("/nas/up", params={"method": "wol"})
+
+    default_run, query_run = _request_logs(caplog)
+    assert default_run.levelno == logging.INFO
+    assert default_run.getMessage() == (
+        "power host=nas action=up method=ipmi method_source=default "
+        'status=ok detail="ipmi on"'
+    )
+    assert "method=wol method_source=query" in query_run.getMessage()
+
+
+def test_power_failure_logs_warning_once(caplog):
+    failing = FakeMethod(
+        "ssh", "box", down=True, raises=ExecutionError("ssh", "down", "timeout")
+    )
+    host = make_host("box", [failing], power={ACTION_DOWN: "ssh"})
+    client = TestClient(create_api(Config(hosts={"box": host}, power={})))
+    caplog.set_level(logging.INFO, logger="circadiand")
+    client.post("/box/down")
+
+    (record,) = _request_logs(caplog)
+    assert record.levelno == logging.WARNING
+    assert record.getMessage() == (
+        "power host=box action=down method=ssh method_source=default "
+        "status=error detail=timeout"
+    )
+
+
+def test_rejected_request_logs_host(client, caplog):
+    caplog.set_level(logging.INFO, logger="circadiand")
+    client.post("/nas/up", params={"method": "ssh"})
+
+    (record,) = _request_logs(caplog)
+    assert record.levelno == logging.WARNING
+    assert record.getMessage().startswith(
+        'rejected host=nas request="POST /nas/up" status=400 '
+    )
+
+
+def test_status_logs_parsed_result(config, caplog):
+    status = HealthStatus(
+        HEALTH_DEAD, "ping", 5, "2026-07-01T00:00:00+00:00",
+        "nas is not responding to ping",
+    )
+    caplog.set_level(logging.INFO, logger="circadiand")
+    _health_client(config, {"nas": status}).get("/nas")
+
+    (record,) = _request_logs(caplog)
+    assert record.getMessage() == (
+        "status host=nas state=dead method=ping interval=5 "
+        'checked_at=2026-07-01T00:00:00+00:00 detail="nas is not responding to ping"'
+    )
+
+
+def test_status_omits_empty_detail(config, caplog):
+    status = HealthStatus(HEALTH_ALIVE, "ping", 5, "2026-07-01T00:00:00+00:00")
+    caplog.set_level(logging.INFO, logger="circadiand")
+    _health_client(config, {"nas": status}).get("/nas")
+
+    (record,) = _request_logs(caplog)
+    assert "detail=" not in record.getMessage()
+
