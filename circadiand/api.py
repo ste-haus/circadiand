@@ -54,18 +54,8 @@ LOG_EVENT_REJECTED = "rejected"
 METHOD_SOURCE_QUERY = "query"
 METHOD_SOURCE_DEFAULT = "default"
 
-# Kubelet probes identify themselves this way; they are the orchestrator, not a
-# real caller, so their requests are not logged.
-HEADER_USER_AGENT = "user-agent"
-KUBE_PROBE_USER_AGENT_PREFIX = "kube-probe/"
-
 PATH_PARAM_HOSTNAME = "hostname"
 LOG_VALUE_SPECIAL_CHARS = ('"', "=")
-
-
-def _is_kube_probe(request: Request) -> bool:
-    user_agent = request.headers.get(HEADER_USER_AGENT, "")
-    return user_agent.startswith(KUBE_PROBE_USER_AGENT_PREFIX)
 
 
 def _format_log_value(value: object) -> str:
@@ -181,7 +171,7 @@ def create_api(
     async def _handle_request_error(request: Request, exc: RequestError) -> JSONResponse:
         # Power failures on the target are logged by the power handler with the
         # full action context.
-        if not isinstance(exc, ExecutionError) and not _is_kube_probe(request):
+        if not isinstance(exc, ExecutionError):
             _log_request(
                 logging.WARNING,
                 LOG_EVENT_REJECTED,
@@ -258,7 +248,6 @@ def create_api(
         dependencies=[Depends(require_auth)],
     )
     async def power(
-        request: Request,
         hostname: str,
         action: Action,
         method: Optional[str] = Query(
@@ -271,7 +260,6 @@ def create_api(
         if not resolved.supports(action.value):
             raise UnsupportedAction(resolved.TYPE, action.value)
 
-        should_log = not _is_kube_probe(request)
         log_fields = {
             "host": hostname,
             "action": action.value,
@@ -281,20 +269,18 @@ def create_api(
         try:
             detail = await run_in_threadpool(resolved.run, action.value)
         except ExecutionError as exc:
-            if should_log:
-                _log_request(
-                    logging.WARNING,
-                    LOG_EVENT_POWER,
-                    **log_fields,
-                    status=STATUS_ERROR,
-                    detail=exc.detail,
-                )
+            _log_request(
+                logging.WARNING,
+                LOG_EVENT_POWER,
+                **log_fields,
+                status=STATUS_ERROR,
+                detail=exc.detail,
+            )
             raise
 
-        if should_log:
-            _log_request(
-                logging.INFO, LOG_EVENT_POWER, **log_fields, status=STATUS_OK, detail=detail
-            )
+        _log_request(
+            logging.INFO, LOG_EVENT_POWER, **log_fields, status=STATUS_OK, detail=detail
+        )
         return ActionResult(
             hostname=hostname, method=resolved.TYPE, action=action.value, detail=detail
         )
@@ -315,7 +301,7 @@ def create_api(
             },
         },
     )
-    def health(hostname: str, request: Request, response: Response) -> HostHealth:
+    def health(hostname: str, response: Response) -> HostHealth:
         # Intentionally unauthenticated: read-only liveliness metadata, the same
         # class as /list.
         active = current()
@@ -330,17 +316,16 @@ def create_api(
             else status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
-        if not _is_kube_probe(request):
-            _log_request(
-                logging.INFO,
-                LOG_EVENT_STATUS,
-                host=hostname,
-                state=result.state,
-                method=result.method,
-                interval=result.interval,
-                checked_at=result.checked_at,
-                detail=result.detail,
-            )
+        _log_request(
+            logging.INFO,
+            LOG_EVENT_STATUS,
+            host=hostname,
+            state=result.state,
+            method=result.method,
+            interval=result.interval,
+            checked_at=result.checked_at,
+            detail=result.detail,
+        )
         return HostHealth(
             hostname=hostname,
             state=result.state,

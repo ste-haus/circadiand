@@ -269,9 +269,6 @@ def test_health_route_does_not_shadow_list(config):
 
 # --- request logging ---------------------------------------------------------
 
-KUBE_PROBE_HEADERS = {"User-Agent": "kube-probe/1.30"}
-
-
 def _request_logs(caplog) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.name == "circadiand"]
 
@@ -341,14 +338,3 @@ def test_status_omits_empty_detail(config, caplog):
     (record,) = _request_logs(caplog)
     assert "detail=" not in record.getMessage()
 
-
-def test_kube_probe_requests_are_not_logged(config, caplog):
-    status = HealthStatus(HEALTH_ALIVE, "ping", 5, "2026-07-01T00:00:00+00:00")
-    client = _health_client(config, {"nas": status})
-    caplog.set_level(logging.INFO, logger="circadiand")
-
-    client.get("/nas", headers=KUBE_PROBE_HEADERS)
-    client.get("/ghost", headers=KUBE_PROBE_HEADERS)
-    client.post("/nas/up", headers=KUBE_PROBE_HEADERS)
-
-    assert _request_logs(caplog) == []

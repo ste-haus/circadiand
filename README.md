@@ -169,7 +169,7 @@ WARNING:circadiand:power host=nas action=down method=ssh method_source=query sta
 WARNING:circadiand:rejected host=ghost request="POST /ghost/up" status=404 detail="unknown host 'ghost'"
 ```
 
-`method_source` is `query` when the caller chose the method and `default` when it came from the host or global power default. The background health monitor never logs its probes, and requests from Kubernetes probes (`User-Agent: kube-probe/...`) are not logged either.
+`method_source` is `query` when the caller chose the method and `default` when it came from the host or global power default. The background health monitor never logs its probes.
 
 When running behind a reverse proxy, set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's address (or CIDR) so the access log records the real client from `X-Forwarded-For` instead of the proxy.
 
