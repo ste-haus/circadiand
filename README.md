@@ -5,6 +5,11 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://github.com/ste-haus/circadiand/actions/workflows/build-image.yml"><img src="https://github.com/ste-haus/circadiand/actions/workflows/build-image.yml/badge.svg" alt="status-badge"></a>
+  <a href="https://github.com/ste-haus/circadiand/pkgs/container/circadiand"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fste-haus%2Fcircadiand%2Fmain%2FVERSION&search=%5Cd%2B%5C.%5Cd%2B%5C.%5Cd%2B&label=image&color=blue&logo=docker&logoColor=white" alt="image-badge"></a>
+</p>
+
 # circadiand
 
 A small REST service for powering hosts **on** (Wake-on-LAN, IPMI) and **off** (SSH). Power methods are generic and extensible — adding a new one is a single file under `circadiand/methods/`.
