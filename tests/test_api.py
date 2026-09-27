@@ -338,3 +338,44 @@ def test_status_omits_empty_detail(config, caplog):
     (record,) = _request_logs(caplog)
     assert "detail=" not in record.getMessage()
 
+
+
+# --- favicon & docs -------------------------------------------------------------
+
+ICO_MAGIC = b"\x00\x00\x01\x00"
+
+
+def test_favicon_served(client):
+    resp = client.get("/favicon.ico")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/x-icon"
+    assert resp.content.startswith(ICO_MAGIC)
+
+
+def test_favicon_unauthenticated_even_with_token():
+    client = _auth_client()
+    assert client.get("/favicon.ico").status_code == 200
+
+
+def test_favicon_not_in_schema(client):
+    assert "/favicon.ico" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_swagger_ui_uses_favicon_and_keeps_sorting(client):
+    resp = client.get("/docs")
+    assert resp.status_code == 200
+    assert 'href="/favicon.ico"' in resp.text
+    assert '"operationsSorter": "alpha"' in resp.text
+    assert client.get("/docs/oauth2-redirect").status_code == 200
+
+
+def test_redoc_uses_favicon(client):
+    resp = client.get("/redoc")
+    assert resp.status_code == 200
+    assert 'href="/favicon.ico"' in resp.text
+
+
+def test_root_redirects_to_docs(client):
+    resp = client.get("/", follow_redirects=False)
+    assert resp.status_code in (302, 307)
+    assert resp.headers["location"] == "/docs"

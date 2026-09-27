@@ -3,10 +3,16 @@
 import json
 import logging
 from enum import Enum
+from importlib.resources import files
 from typing import Optional, Union
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.openapi.docs import (
+    get_redoc_html,
+    get_swagger_ui_html,
+    get_swagger_ui_oauth2_redirect_html,
+)
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -55,6 +61,14 @@ METHOD_SOURCE_QUERY = "query"
 METHOD_SOURCE_DEFAULT = "default"
 
 PATH_PARAM_HOSTNAME = "hostname"
+
+DOCS_URL = "/docs"
+REDOC_URL = "/redoc"
+FAVICON_URL = "/favicon.ico"
+FAVICON_MEDIA_TYPE = "image/x-icon"
+FAVICON_CACHE_CONTROL = "public, max-age=86400"
+# Read once at import; shipped as package data (see setup.cfg).
+FAVICON = files(__package__).joinpath("static/favicon.ico").read_bytes()
 LOG_VALUE_SPECIAL_CHARS = ('"', "=")
 
 
@@ -141,11 +155,16 @@ def create_api(
     # Sort operations and tags alphabetically in the Swagger UI so the endpoint
     # list is stable and easy to scan (routes are declared in match-priority
     # order, which isn't alphabetical).
+    #
+    # FastAPI's built-in /docs and /redoc pages hardcode FastAPI's own favicon, so
+    # they're disabled here and re-declared below with ours.
     app = FastAPI(
         title=APP_TITLE,
         version=__version__,
         description=APP_DESCRIPTION,
         swagger_ui_parameters={"operationsSorter": "alpha", "tagsSorter": "alpha"},
+        docs_url=None,
+        redoc_url=None,
     )
     bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -188,10 +207,54 @@ def create_api(
         status.HTTP_502_BAD_GATEWAY: {"description": "Power method failed on target"},
     }
 
+    def _root_path(request: Request) -> str:
+        # Honour a proxy prefix the same way FastAPI's built-in docs routes do.
+        return request.scope.get("root_path", "").rstrip("/")
+
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
-        # Send the bare root to the interactive API docs (path per app.docs_url).
-        return RedirectResponse(url=app.docs_url)
+        # Send the bare root to the interactive API docs.
+        return RedirectResponse(url=DOCS_URL)
+
+    @app.get(FAVICON_URL, include_in_schema=False)
+    def favicon() -> Response:
+        # Unauthenticated, like the docs pages that reference it. Declared ahead
+        # of GET /{hostname} so it isn't treated as an unknown host.
+        return Response(
+            content=FAVICON,
+            media_type=FAVICON_MEDIA_TYPE,
+            headers={"Cache-Control": FAVICON_CACHE_CONTROL},
+        )
+
+    @app.get(DOCS_URL, include_in_schema=False)
+    def swagger_ui(request: Request) -> HTMLResponse:
+        root_path = _root_path(request)
+        oauth2_redirect_url = app.swagger_ui_oauth2_redirect_url
+        return get_swagger_ui_html(
+            openapi_url=root_path + app.openapi_url,
+            title=f"{app.title} - Swagger UI",
+            oauth2_redirect_url=(
+                root_path + oauth2_redirect_url if oauth2_redirect_url else None
+            ),
+            init_oauth=app.swagger_ui_init_oauth,
+            swagger_favicon_url=root_path + FAVICON_URL,
+            swagger_ui_parameters=app.swagger_ui_parameters,
+        )
+
+    if app.swagger_ui_oauth2_redirect_url:
+
+        @app.get(app.swagger_ui_oauth2_redirect_url, include_in_schema=False)
+        def swagger_ui_oauth2_redirect() -> HTMLResponse:
+            return get_swagger_ui_oauth2_redirect_html()
+
+    @app.get(REDOC_URL, include_in_schema=False)
+    def redoc(request: Request) -> HTMLResponse:
+        root_path = _root_path(request)
+        return get_redoc_html(
+            openapi_url=root_path + app.openapi_url,
+            title=f"{app.title} - ReDoc",
+            redoc_favicon_url=root_path + FAVICON_URL,
+        )
 
     @app.get(
         "/list",
@@ -285,8 +348,9 @@ def create_api(
             hostname=hostname, method=resolved.TYPE, action=action.value, detail=detail
         )
 
-    # Declared last so the literal GET routes (/list, /public-key) and FastAPI's
-    # own /docs, /openapi.json win the match for a bare depth-1 GET path.
+    # Declared last so the literal GET routes (/list, /public-key, /favicon.ico,
+    # /docs, /redoc) and FastAPI's own /openapi.json win the match for a bare
+    # depth-1 GET path.
     @app.get(
         "/{hostname}",
         response_model=HostHealth,

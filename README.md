@@ -1,3 +1,16 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-white.svg">
+    <img src="assets/logo-black.svg" alt="circadiand" width="160">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ste-haus/circadiand/actions/workflows/build-image.yml"><img src="https://github.com/ste-haus/circadiand/actions/workflows/build-image.yml/badge.svg" alt="status-badge"></a>
+  <a href="https://github.com/ste-haus/circadiand/pkgs/container/circadiand"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fste-haus%2Fcircadiand%2Fmain%2FVERSION&search=%5Cd%2B%5C.%5Cd%2B%5C.%5Cd%2B&label=image&color=blue&logo=docker&logoColor=white" alt="image-badge"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/ste-haus/circadiand" alt="license-badge"></a>
+</p>
+
 # circadiand
 
 A small REST service for powering hosts **on** (Wake-on-LAN, IPMI) and **off** (SSH). Power methods are generic and extensible — adding a new one is a single file under `circadiand/methods/`.
@@ -19,7 +32,7 @@ curl -X POST localhost:8000/nas/up?method=wol      # force a specific method
 curl -X POST localhost:8000/workstation/down
 ```
 
-Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw schema is at `/openapi.json`. Swagger operations and tags are sorted alphabetically (`swagger_ui_parameters` in `create_api`) — keep new routes findable by leaning on that rather than declaration order.
+Interactive API docs are served at `/docs` (Swagger UI) and `/redoc`; the raw schema is at `/openapi.json`. `/favicon.ico` serves the circadiand icon (unauthenticated); both docs pages use it, and it's shipped as package data from `circadiand/static/`. Swagger operations and tags are sorted alphabetically (`swagger_ui_parameters` in `create_api`) — keep new routes findable by leaning on that rather than declaration order.
 
 ## Methods
 
